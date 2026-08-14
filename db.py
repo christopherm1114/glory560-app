@@ -157,15 +157,18 @@ def crear_alerta(vehiculo_id: int, tipo_id: int, fecha_programada: str) -> dict:
     return resp.data[0]
 
 
-def alerta_reciente_existe(vehiculo_id: int, tipo_id: int) -> bool:
+def alerta_reciente_existe(vehiculo_id: int, tipo_id: int, dias: int = 7) -> bool:
     """
-    Evita mandar el mismo recordatorio todos los días: revisa si ya hay una
-    alerta 'enviada' para ese vehículo y control.
+    Evita spam: solo considera 'reciente' una alerta enviada en los últimos
+    'dias' (por defecto 7). Así, si un mantenimiento sigue pendiente, se vuelve
+    a recordar a la semana siguiente, pero no todos los días.
     """
+    from datetime import datetime, timezone, timedelta
+    limite = (datetime.now(timezone.utc) - timedelta(days=dias)).isoformat()
     resp = (supabase.table("alertas").select("id")
             .eq("vehiculo_id", vehiculo_id)
             .eq("tipo_mantenimiento_id", tipo_id)
-            .eq("estado", "enviada").limit(1).execute())
+            .gte("fecha_enviada", limite).limit(1).execute())
     return bool(resp.data)
 
 

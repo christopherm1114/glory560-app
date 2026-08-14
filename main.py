@@ -48,8 +48,13 @@ async def webhook_telegram(
     return {"ok": True}
 
 
+# Acepta GET y POST para que cualquier programador externo (ej. cron-job.org)
+# pueda llamarlo fácilmente. Se protege con un 'token' en la dirección, que
+# debe coincidir con TELEGRAM_WEBHOOK_SECRET (así nadie más puede dispararlo).
+@app.get("/tasks/revisar-vencimientos")
 @app.post("/tasks/revisar-vencimientos")
-async def revisar_vencimientos():
-    """Permite disparar los recordatorios manualmente (útil para probar)."""
+async def revisar_vencimientos(token: str = ""):
+    if TELEGRAM_WEBHOOK_SECRET and token != TELEGRAM_WEBHOOK_SECRET:
+        raise HTTPException(status_code=403, detail="token inválido")
     total = await run_in_threadpool(tareas.revisar_vencimientos)
     return {"alertas_enviadas": total}
