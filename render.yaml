@@ -1,9 +1,5 @@
-# =====================================================================
-# render.yaml — describe los servicios que Render creará automáticamente.
-# (Versión con archivos "planos", sin carpetas.)
-# =====================================================================
+# render.yaml — solo el servicio web (bot). Gratis.
 services:
-  # 1) El servicio web: la API de FastAPI que recibe el webhook de Telegram.
   - type: web
     name: glory560-bot
     runtime: python
@@ -14,24 +10,6 @@ services:
       - key: TELEGRAM_BOT_TOKEN
         sync: false
       - key: TELEGRAM_WEBHOOK_SECRET
-        sync: false
-      - key: SUPABASE_URL
-        sync: false
-      - key: SUPABASE_SERVICE_KEY
-        sync: false
-      - key: ADMIN_TELEGRAM_ID
-        sync: false
-
-  # 2) El cron job: revisa a diario los mantenimientos por vencer.
-  - type: cron
-    name: glory560-recordatorios
-    runtime: python
-    plan: free
-    schedule: "0 13 * * *"   # 13:00 UTC = 08:00 en Ecuador (UTC-5)
-    buildCommand: pip install -r requirements.txt
-    startCommand: python tareas.py
-    envVars:
-      - key: TELEGRAM_BOT_TOKEN
         sync: false
       - key: SUPABASE_URL
         sync: false
