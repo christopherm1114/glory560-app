@@ -1,0 +1,7 @@
+# No subir secretos ni basura de Python a GitHub
+.env
+__pycache__/
+*.pyc
+.venv/
+venv/
+.DS_Store

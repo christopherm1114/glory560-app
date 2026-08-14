@@ -1,0 +1,12 @@
+# Dependencias de la aplicación (Python 3.11+)
+# FastAPI: framework web que recibe el webhook de Telegram y expone la API.
+fastapi==0.115.0
+# Uvicorn: servidor que ejecuta la app FastAPI en Render.
+uvicorn[standard]==0.30.6
+# Cliente oficial de Supabase para leer/escribir en la base de datos PostgreSQL.
+supabase==2.7.4
+# python-dotenv: carga las variables de entorno desde el archivo .env cuando
+# corres la app en tu computadora (en Render las variables se configuran aparte).
+python-dotenv==1.0.1
+# httpx viene incluido con supabase; lo usamos también para hablar con Telegram.
+httpx==0.27.2
