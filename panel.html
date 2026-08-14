@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mantenimientos Glory 560</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root{
+    --plane:#f9f9f7; --surface:#fcfcfb; --ink:#0b0b0b; --ink2:#52514e; --muted:#898781;
+    --grid:#e1e0d9; --baseline:#c3c2b7; --border:rgba(11,11,11,.10);
+    --brand:#2c6e9b; --good:#0ca30c; --warning:#fab219; --critical:#d03b3b; --serie:#2a78d6;
+    --c1:#2a78d6; --c2:#eb6834; --c3:#1baf7a; --c4:#eda100; --c5:#e87ba4;
+    color-scheme:light;
+  }
+  @media (prefers-color-scheme:dark){:root{
+    --plane:#0d0d0d; --surface:#1a1a19; --ink:#fff; --ink2:#c3c2b7; --muted:#898781;
+    --grid:#2c2c2a; --baseline:#383835; --border:rgba(255,255,255,.10);
+    --serie:#3987e5; --c1:#3987e5; --c2:#d95926; --c3:#199e70; --c4:#c98500; --c5:#d55181; color-scheme:dark;}}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--plane);color:var(--ink);font-family:system-ui,-apple-system,"Segoe UI",sans-serif;font-size:15px;line-height:1.5}
+  header{background:var(--surface);border-bottom:1px solid var(--border);padding:12px 18px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+  header h1{font-size:17px;margin:0}
+  .wrap{max-width:1000px;margin:0 auto;padding:18px}
+  .btn{background:var(--brand);color:#fff;border:none;border-radius:8px;padding:8px 14px;font-size:14px;cursor:pointer}
+  .btn.ghost{background:transparent;color:var(--ink2);border:1px solid var(--border)}
+  .btn.ok{background:var(--good)} .btn.no{background:var(--critical)} .btn.sm{padding:5px 10px;font-size:12px}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:16px}
+  .card h2{font-size:14px;margin:0 0 12px;color:var(--ink2);font-weight:600}
+  .tabs{display:flex;gap:6px;flex-wrap:wrap}
+  .tab{font-size:13px;padding:7px 12px;border:1px solid var(--border);border-radius:999px;color:var(--ink2);background:transparent;cursor:pointer}
+  .tab.act{background:var(--brand);color:#fff;border-color:var(--brand)}
+  .field{font-size:12px;color:var(--muted);margin:8px 0 3px}
+  input,select{width:100%;padding:8px 10px;border:1px solid var(--baseline);border-radius:8px;background:var(--surface);color:var(--ink);font-size:14px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
+  .tile .k{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+  .tile .v{font-size:24px;font-weight:700}
+  .sem{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--grid)}
+  .sem:last-child{border-bottom:none}
+  .punto{width:12px;height:12px;border-radius:50%;flex:none}
+  .p-good{background:var(--good)} .p-warning{background:var(--warning)} .p-critical{background:var(--critical)}
+  .chip{font-size:11px;padding:2px 8px;border-radius:999px;border:1px solid var(--border)}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th{text-align:left;color:var(--muted);font-weight:600;font-size:11px;text-transform:uppercase;padding:8px;border-bottom:1px solid var(--baseline)}
+  td{padding:8px;border-bottom:1px solid var(--grid);font-variant-numeric:tabular-nums}
+  canvas{max-width:100%}
+  .oculto{display:none!important}
+  .muted{color:var(--muted);font-size:13px}
+  .badge{background:var(--critical);color:#fff;font-size:11px;padding:1px 8px;border-radius:999px}
+  /* Login */
+  #login{max-width:360px;margin:70px auto;padding:28px;background:var(--surface);border:1px solid var(--border);border-radius:14px}
+  #login h1{font-size:20px;margin:0 0 6px}
+  /* Modal */
+  #modal{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:flex-start;justify-content:center;padding:30px 14px;overflow:auto}
+  #modal .inner{background:var(--surface);border-radius:14px;max-width:820px;width:100%;padding:18px}
+  @media(max-width:640px){.grid2,.grid3{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+
+<!-- ============ LOGIN ============ -->
+<div id="login" class="oculto">
+  <h1>🚗 Mantenimientos Glory 560</h1>
+  <p class="muted">Ingresa con tu número de teléfono.</p>
+  <div class="field">Usuario (número de teléfono)</div>
+  <input id="in-usuario" inputmode="tel" placeholder="Ej. 0999123456">
+  <div class="field">Contraseña (tu número de teléfono)</div>
+  <input id="in-clave" type="password" placeholder="Tu teléfono">
+  <div id="login-error" class="muted oculto" style="color:var(--critical);margin-top:8px"></div>
+  <button class="btn" style="width:100%;margin-top:14px" onclick="hacerLogin()">Entrar</button>
+</div>
+
+<!-- ============ APP ============ -->
+<div id="app" class="oculto">
+  <header>
+    <div><h1>🚗 <span id="h-titulo">Glory 560</span></h1><div class="muted" id="h-sub"></div></div>
+    <div><span class="chip" id="h-rol"></span> <button class="btn ghost sm" onclick="logout()">Cerrar sesión</button></div>
+  </header>
+  <div class="wrap">
+    <div class="tabs" id="tabs" style="margin-bottom:16px"></div>
+    <div id="contenido"></div>
+  </div>
+</div>
+
+<!-- ============ MODAL (detalle de usuario) ============ -->
+<div id="modal" class="oculto"><div class="inner" id="modal-cont"></div></div>
+
+<script>
+const $ = s => document.querySelector(s);
+const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const CATS = ['--c1','--c2','--c3','--c4','--c5'].map(css);
+const money = n => '$' + Number(n||0).toLocaleString('es-EC',{minimumFractionDigits:2,maximumFractionDigits:2});
+const numf = n => Number(n||0).toLocaleString('es-EC');
+let SESION = null;   // {nombre, rol}
+let DATOS = null;    // mis-datos
+
+// ---------- Arranque: ¿hay sesión? ----------
+async function iniciar(){
+  const r = await fetch('/api/sesion');
+  if(r.status !== 200){ mostrarLogin(); return; }
+  SESION = await r.json();
+  $('#login').classList.add('oculto');
+  $('#app').classList.remove('oculto');
+  $('#h-rol').textContent = SESION.rol === 'admin' ? '🛠️ Administrador' : '👤 Usuario';
+  construirTabs();
+  abrirTab(TABS[0].id);
+}
+function mostrarLogin(){ $('#app').classList.add('oculto'); $('#login').classList.remove('oculto'); }
+
+async function hacerLogin(){
+  const usuario = $('#in-usuario').value.trim();
+  const contrasena = $('#in-clave').value.trim();
+  const r = await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({usuario,contrasena})});
+  if(r.status===200){ location.reload(); }
+  else { const e=$('#login-error'); e.textContent='Usuario o contraseña incorrectos, o cuenta no aprobada.'; e.classList.remove('oculto'); }
+}
+async function logout(){ await fetch('/api/logout',{method:'POST'}); location.reload(); }
+
+// ---------- Viñetas ----------
+let TABS = [];
+function construirTabs(){
+  TABS = [
+    {id:'perfil', txt:'Perfil'},
+    {id:'mant', txt:'Mantenimientos próximos'},
+    {id:'insumos', txt:'Insumos vehiculares'},
+  ];
+  if(SESION.rol==='admin'){
+    TABS.push({id:'aprob', txt:'Aprobaciones'});
+    TABS.push({id:'usuarios', txt:'Usuarios'});
+    TABS.push({id:'roles', txt:'Roles'});
+  }
+  $('#tabs').innerHTML = TABS.map(t=>`<button class="tab" data-id="${t.id}" onclick="abrirTab('${t.id}')">${t.txt}</button>`).join('');
+}
+function marcarTab(id){ document.querySelectorAll('.tab').forEach(b=>b.classList.toggle('act', b.dataset.id===id)); }
+
+async function abrirTab(id){
+  marcarTab(id);
+  const c = $('#contenido');
+  if(['perfil','mant','insumos'].includes(id)){
+    if(!DATOS){ const r=await fetch('/api/mis-datos'); DATOS=await r.json(); }
+    if(id==='perfil') vistaPerfil(c, DATOS);
+    if(id==='mant') vistaMant(c, DATOS);
+    if(id==='insumos') vistaInsumos(c, DATOS);
+  }
+  if(id==='aprob') vistaAprobaciones(c);
+  if(id==='usuarios') vistaUsuarios(c);
+  if(id==='roles') vistaRoles(c);
+  $('#h-titulo').textContent = (DATOS&&DATOS.vehiculo)?DATOS.vehiculo.placa:'Glory 560';
+  $('#h-sub').textContent = (DATOS&&DATOS.variante)?`${DATOS.variante.nombre} · ${DATOS.variante.motor} / ${DATOS.variante.transmision}`:'';
+}
+
+// ---------- Vista: Perfil (editable) ----------
+function vistaPerfil(c, d){
+  if(!d.vehiculo){ c.innerHTML='<div class="card">No tienes un vehículo registrado.</div>'; return; }
+  const v=d.vehiculo;
+  c.innerHTML = `<div class="card"><h2>Datos de mi vehículo</h2>
+    <div class="field">Placa</div><input id="p-placa" value="${v.placa||''}">
+    <div class="grid2">
+      <div><div class="field">Año</div><input id="p-anio" value="${v.anio||''}"></div>
+      <div><div class="field">Kilometraje actual</div><input id="p-km" value="${v.kilometraje||0}"></div>
+    </div>
+    <div class="grid2">
+      <div><div class="field">Motor</div><select id="p-motor">
+        <option ${d.variante.motor==='1.8 Aspirado'?'selected':''}>1.8 Aspirado</option>
+        <option ${d.variante.motor==='1.5 Turbo'?'selected':''}>1.5 Turbo</option></select></div>
+      <div><div class="field">Transmisión</div><select id="p-trans">
+        <option value="Manual" ${d.variante.transmision!=='CVT'?'selected':''}>Manual</option>
+        <option value="CVT" ${d.variante.transmision==='CVT'?'selected':''}>Automática CVT</option></select></div>
+    </div>
+    <div class="muted" style="margin-top:6px">Cambiar motor/transmisión recalcula insumos e intervalos.</div>
+    <button class="btn" style="margin-top:12px" onclick="guardarPerfil()">Guardar cambios</button>
+    <span id="p-ok" class="muted oculto" style="color:var(--good);margin-left:10px">✓ Guardado</span>
+  </div>`;
+}
+async function guardarPerfil(){
+  const cambios={ placa:$('#p-placa').value, anio:$('#p-anio').value, kilometraje:$('#p-km').value,
+    motor:$('#p-motor').value, transmision:$('#p-trans').value };
+  await fetch('/api/perfil',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(cambios)});
+  DATOS=null; // forzar recarga
+  $('#p-ok').classList.remove('oculto');
+  const r=await fetch('/api/mis-datos'); DATOS=await r.json();
+}
+
+// ---------- Vista: Mantenimientos próximos ----------
+function vistaMant(c, d){
+  if(!d.vehiculo){ c.innerHTML='<div class="card">Sin vehículo.</div>'; return; }
+  c.innerHTML = `
+    <div class="grid3">
+      <div class="card tile"><div class="k">Total de gastos</div><div class="v">${money(d.total_gastos)}</div></div>
+      <div class="card tile"><div class="k">Kilometraje</div><div class="v">${numf(d.vehiculo.kilometraje)} km</div></div>
+      <div class="card tile"><div class="k">Mantenimientos</div><div class="v">${d.historial.length}</div></div>
+    </div>
+    <div class="card"><h2>Semáforo de mantenimientos</h2><div id="sem"></div></div>
+    <div class="card"><h2>Últimos 5 mantenimientos</h2>
+      <div style="overflow-x:auto"><table><thead><tr><th>Descripción</th><th>Fecha</th><th>Hora reg.</th><th>Precio</th></tr></thead>
+      <tbody id="tb-ult"></tbody></table></div><div id="ult-vacio" class="muted oculto">Aún no hay mantenimientos.</div></div>
+    <div class="card"><h2>Historial de kilometraje</h2><canvas id="cv-km" height="200"></canvas><div id="km-vacio" class="muted oculto"></div></div>`;
+  pintarSemaforo($('#sem'), d.proximos);
+  const ult=d.ultimos||[];
+  if(ult.length===0) $('#ult-vacio').classList.remove('oculto');
+  else $('#tb-ult').innerHTML = ult.map(r=>`<tr><td>${r.nombre}</td><td>${r.fecha||'-'}</td><td>${horaDe(r.creado_en)}</td><td>${r.costo!=null?money(r.costo):'-'}</td></tr>`).join('');
+  graficoKm(d.kilometraje_historial||[]);
+}
+function horaDe(ts){ if(!ts) return '-'; try{ return new Date(ts).toLocaleTimeString('es-EC',{hour:'2-digit',minute:'2-digit'}); }catch(e){ return '-'; } }
+
+function pintarSemaforo(cont, proximos){
+  const orden={vencido:0,proximo:1,al_dia:2};
+  const items=(proximos||[]).slice().sort((a,b)=>orden[a.estado]-orden[b.estado]);
+  cont.innerHTML = items.map(r=>{
+    const p=r.estado==='vencido'?'p-critical':(r.estado==='proximo'?'p-warning':'p-good');
+    const et=r.estado==='vencido'?'Vencido':(r.estado==='proximo'?'Próximo':'Al día');
+    let det='sin datos'; if(r.km_restante!=null) det=r.km_restante<=0?`excedido ${Math.abs(r.km_restante)} km`:`faltan ${r.km_restante} km`;
+    return `<div class="sem"><span class="punto ${p}"></span><span style="flex:1">${r.nombre}</span><span class="muted">${det}</span><span class="chip">${et}</span></div>`;
+  }).join('');
+}
+function graficoKm(km){
+  if(typeof Chart==='undefined' || km.length<2){
+    $('#cv-km').classList.add('oculto'); const e=$('#km-vacio'); e.classList.remove('oculto');
+    e.textContent = km.length<2?'Se necesitan al menos dos lecturas de kilometraje.':'Gráfico no disponible.'; return;
+  }
+  new Chart($('#cv-km'),{type:'line',
+    data:{labels:km.map(x=>x.fecha),datasets:[{data:km.map(x=>x.kilometraje),borderColor:css('--serie'),borderWidth:2,pointRadius:3,tension:.25}]},
+    options:{plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>numf(c.parsed.y)+' km'}}},
+      scales:{x:{grid:{display:false},ticks:{color:css('--muted')}},y:{grid:{color:css('--grid')},ticks:{color:css('--muted'),callback:v=>numf(v)}}}}});
+}
+
+// ---------- Vista: Insumos ----------
+function vistaInsumos(c, d){
+  if(!d.variante){ c.innerHTML='<div class="card">Sin vehículo.</div>'; return; }
+  const v=d.variante;
+  const fila=(k,val)=>`<div class="sem"><span style="flex:1">${k}</span><span class="chip">${val}</span></div>`;
+  c.innerHTML = `<div class="card"><h2>Insumos de tu variante (${v.nombre})</h2>
+    ${fila('Aceite de motor', v.aceite)}
+    ${fila('Bujías', v.bujia)}
+    ${fila('Líquido de transmisión', v.transmision_liquido)}
+    ${fila('Refrigerante', v.refrigerante)}
+    ${fila('Llantas', v.llantas)}
+  </div>`;
+}
+
+// ---------- Vista admin: Aprobaciones ----------
+async function vistaAprobaciones(c){
+  const r=await fetch('/api/aprobaciones'); const d=await r.json();
+  const p=d.pendientes||[];
+  c.innerHTML = `<div class="card"><h2>Solicitudes pendientes ${p.length?`<span class="badge">${p.length}</span>`:''}</h2>
+    <div id="lista-aprob">${p.length?'':'<div class="muted">No hay solicitudes pendientes.</div>'}</div></div>`;
+  $('#lista-aprob').innerHTML = p.map(x=>`<div class="sem"><span style="flex:1">${x.nombre} · ${x.telefono} · Placa ${x.placa}</span>
+    <button class="btn ok sm" onclick="aprobar(${x.id})">Aprobar</button>
+    <button class="btn no sm" onclick="rechazar(${x.id})">Rechazar</button></div>`).join('');
+}
+async function aprobar(id){ await fetch('/api/aprobar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})}); abrirTab('aprob'); }
+async function rechazar(id){ await fetch('/api/rechazar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})}); abrirTab('aprob'); }
+
+// ---------- Vista admin: Usuarios ----------
+async function vistaUsuarios(c){
+  const r=await fetch('/api/usuarios'); const d=await r.json();
+  const u=d.usuarios||[];
+  c.innerHTML = `<div class="card"><h2>Usuarios registrados (${u.length})</h2>
+    <div style="overflow-x:auto"><table><thead><tr><th>Nombre</th><th>Teléfono</th><th>Vehículo</th><th></th></tr></thead>
+    <tbody>${u.map(x=>`<tr><td>${x.nombre} ${x.rol==='admin'?'<span class="chip">admin</span>':''}</td><td>${x.telefono}</td>
+      <td>${x.placa} · ${x.variante}</td><td><button class="btn ghost sm" onclick="verUsuario(${x.id})">Ver ▸</button></td></tr>`).join('')}</tbody></table></div></div>`;
+}
+async function verUsuario(id){
+  const r=await fetch('/api/usuario/'+id); const d=await r.json();
+  $('#modal').classList.remove('oculto');
+  const v=d.vehiculo, va=d.variante;
+  $('#modal-cont').innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center"><h2 style="margin:0">${d.usuario.nombre}</h2>
+      <button class="btn ghost sm" onclick="cerrarModal()">✕ Cerrar</button></div>
+    <div class="muted" style="margin-bottom:12px">${d.usuario.telefono} · ${va?va.nombre:'-'}</div>
+    <div class="grid3">
+      <div class="card"><h2>Vehículo</h2>Placa: <b>${v?v.placa:'-'}</b><br>Año: ${v?v.anio||'-':'-'}<br>Km: ${v?numf(v.kilometraje):'-'}<br>Aceite: ${va?va.aceite:'-'}</div>
+      <div class="card"><h2>Total gastos</h2><div class="tile"><div class="v">${money(d.total_gastos)}</div></div></div>
+      <div class="card"><h2>Historial km</h2><canvas id="cv-km2" height="120"></canvas><div id="km2-vacio" class="muted oculto">Sin datos</div></div>
+    </div>
+    <div class="card"><h2>Semáforo</h2><div id="sem2"></div></div>
+    <div class="card"><h2>Historial de registros</h2><div style="overflow-x:auto"><table><thead><tr><th>Descripción</th><th>Fecha</th><th>Hora</th><th>Km</th><th>Precio</th></tr></thead>
+      <tbody>${(d.historial||[]).map(x=>`<tr><td>${x.nombre}</td><td>${x.fecha||'-'}</td><td>${horaDe(x.creado_en)}</td><td>${numf(x.km)}</td><td>${x.costo!=null?money(x.costo):'-'}</td></tr>`).join('')||'<tr><td colspan=5 class="muted">Sin registros</td></tr>'}</tbody></table></div></div>`;
+  pintarSemaforo($('#sem2'), d.proximos);
+  const km=d.kilometraje_historial||[];
+  if(typeof Chart!=='undefined' && km.length>=2){
+    new Chart($('#cv-km2'),{type:'line',data:{labels:km.map(x=>x.fecha),datasets:[{data:km.map(x=>x.kilometraje),borderColor:css('--serie'),borderWidth:2,pointRadius:2}]},
+      options:{plugins:{legend:{display:false}},scales:{x:{ticks:{color:css('--muted')}},y:{ticks:{color:css('--muted')}}}}});
+  } else { $('#cv-km2').classList.add('oculto'); $('#km2-vacio').classList.remove('oculto'); }
+}
+function cerrarModal(){ $('#modal').classList.add('oculto'); }
+
+// ---------- Vista admin: Roles ----------
+function vistaRoles(c){
+  c.innerHTML = `<div class="card"><h2>Cambiar rol de un usuario</h2>
+    <div class="field">Buscar por teléfono, nombre o apellido</div>
+    <div style="display:flex;gap:8px"><input id="r-q" placeholder="Ej. Pérez o 0999..."><button class="btn" onclick="buscarRoles()">Buscar</button></div>
+    <div id="r-res" style="margin-top:12px"></div></div>`;
+  $('#r-q').addEventListener('keydown',e=>{ if(e.key==='Enter') buscarRoles(); });
+}
+async function buscarRoles(){
+  const q=$('#r-q').value.trim(); if(!q) return;
+  const r=await fetch('/api/roles/buscar?q='+encodeURIComponent(q)); const d=await r.json();
+  const res=d.resultados||[];
+  $('#r-res').innerHTML = res.length? res.map(x=>{
+    const esAdmin=x.rol==='admin';
+    return `<div class="sem"><span style="flex:1">${x.nombre} · ${x.telefono}</span>
+      <span class="chip">Rol: ${esAdmin?'Admin':'Usuario'}</span>
+      <button class="btn ${esAdmin?'no':''} sm" onclick="cambiarRol(${x.id}, '${esAdmin?'usuario':'admin'}')">${esAdmin?'Quitar admin':'Hacer administrador'}</button></div>`;
+  }).join('') : '<div class="muted">Sin resultados.</div>';
+}
+async function cambiarRol(id, rol){
+  const r=await fetch('/api/roles/cambiar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,rol})});
+  if(r.status!==200){ alert('No se pudo cambiar el rol.'); }
+  buscarRoles();
+}
+
+iniciar();
+</script>
+</body>
+</html>

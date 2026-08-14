@@ -16,8 +16,12 @@ from fastapi.concurrency import run_in_threadpool
 
 from config import TELEGRAM_WEBHOOK_SECRET
 import handlers, tareas
+import web
 
 app = FastAPI(title="Control de Mantenimientos Glory 560")
+
+# Rutas de la web (/panel, /api/login, /api/mis-datos, /api/usuarios, ...).
+app.include_router(web.router)
 
 
 @app.get("/")

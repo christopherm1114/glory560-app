@@ -229,7 +229,7 @@ def _finalizar_registro(chat_id, telegram_id, datos) -> None:
         return
 
     usuario = db.crear_usuario(telegram_id, datos["telefono"], datos["nombre"])
-    db.crear_vehiculo(
+    vehiculo = db.crear_vehiculo(
         usuario_id=usuario["id"],
         variante_id=variante["id"],
         placa=datos["placa"],
@@ -237,6 +237,8 @@ def _finalizar_registro(chat_id, telegram_id, datos) -> None:
         kilometraje=datos.get("kilometraje", 0),
         fecha_ultimo_aceite=datos.get("fecha_ultimo_aceite"),
     )
+    # Guardamos la primera lectura de kilometraje (para el gráfico del dashboard).
+    db.registrar_lectura_km(vehiculo["id"], datos.get("kilometraje", 0))
     db.limpiar_estado(telegram_id)
 
     # Resumen para el usuario con los insumos de SU variante.
@@ -408,6 +410,7 @@ def _aplicar_edicion_perfil(chat_id, telegram_id, usuario, campo, texto) -> None
             return
         db.actualizar_vehiculo(vehiculo_id, {"kilometraje_actual": km,
                                              "fecha_actualizacion_km": db._hoy()})
+        db.registrar_lectura_km(vehiculo_id, km)
 
     db.limpiar_estado(telegram_id)
     tg.enviar_mensaje(chat_id, "✅ Dato actualizado. Escribe /perfil para verlo.")
@@ -445,6 +448,7 @@ def _comando_km(chat_id, telegram_id, usuario, args) -> None:
         return
     db.actualizar_vehiculo(vehiculo["id"], {"kilometraje_actual": km,
                                             "fecha_actualizacion_km": db._hoy()})
+    db.registrar_lectura_km(vehiculo["id"], km)
     tg.enviar_mensaje(chat_id, f"✅ Kilometraje actualizado a {km} km.")
 
 
@@ -504,6 +508,7 @@ def _finalizar_registro_mantenimiento(chat_id, telegram_id, usuario, datos) -> N
     if datos["km"] > (vehiculo.get("kilometraje_actual") or 0):
         db.actualizar_vehiculo(vehiculo["id"], {"kilometraje_actual": datos["km"],
                                                 "fecha_actualizacion_km": db._hoy()})
+        db.registrar_lectura_km(vehiculo["id"], datos["km"])
     tipo = db.obtener_tipo(datos["tipo_id"])
     db.limpiar_estado(telegram_id)
     tg.enviar_mensaje(chat_id,

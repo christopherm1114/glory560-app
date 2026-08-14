@@ -37,6 +37,7 @@ def crear_usuario(telegram_id: int, telefono: str, nombre: str) -> dict:
         "nombre": nombre,
         "estado": "pendiente",
         "rol": "usuario",
+        "clave": telefono,   # contraseña inicial para la web = el teléfono
     }).execute()
     return resp.data[0]
 
@@ -47,6 +48,39 @@ def actualizar_usuario(usuario_id: int, cambios: dict) -> None:
 
 def listar_usuarios_pendientes() -> list[dict]:
     resp = supabase.table("usuarios").select("*").eq("estado", "pendiente").execute()
+    return resp.data or []
+
+
+def obtener_usuario(usuario_id: int) -> dict | None:
+    resp = supabase.table("usuarios").select("*").eq("id", usuario_id).execute()
+    return resp.data[0] if resp.data else None
+
+
+def listar_usuarios_aprobados() -> list[dict]:
+    resp = (supabase.table("usuarios").select("*")
+            .eq("estado", "aprobado").order("nombre").execute())
+    return resp.data or []
+
+
+def buscar_usuario_por_telefono_normalizado(telefono_digitos: str) -> dict | None:
+    """
+    Busca por teléfono comparando solo los dígitos (ignora '+', espacios, etc.).
+    Como la base es pequeña, traemos los usuarios y comparamos en Python.
+    """
+    resp = supabase.table("usuarios").select("*").execute()
+    for u in resp.data or []:
+        guardado = "".join(c for c in str(u.get("telefono") or "") if c.isdigit())
+        if guardado == telefono_digitos and telefono_digitos:
+            return u
+    return None
+
+
+def buscar_usuarios(texto: str) -> list[dict]:
+    """Busca usuarios por nombre o teléfono (para la viñeta de Roles)."""
+    patron = "%" + texto.replace(",", " ").strip() + "%"
+    resp = (supabase.table("usuarios").select("*")
+            .or_(f"nombre.ilike.{patron},telefono.ilike.{patron}")
+            .limit(20).execute())
     return resp.data or []
 
 
@@ -140,7 +174,39 @@ def ultimo_mantenimiento(vehiculo_id: int, tipo_id: int) -> dict | None:
 def historial(vehiculo_id: int, limite: int = 15) -> list[dict]:
     resp = (supabase.table("mantenimientos").select("*")
             .eq("vehiculo_id", vehiculo_id)
-            .order("fecha", desc=True).limit(limite).execute())
+            .order("fecha", desc=True).order("id", desc=True).limit(limite).execute())
+    return resp.data or []
+
+
+def gastos_por_categoria(vehiculo_id: int) -> list[dict]:
+    """Suma los costos de los mantenimientos agrupados por categoría del control."""
+    tipos = {t["id"]: t for t in listar_tipos_mantenimiento()}
+    resp = (supabase.table("mantenimientos").select("tipo_mantenimiento_id, costo")
+            .eq("vehiculo_id", vehiculo_id).execute())
+    acumulado: dict[str, float] = {}
+    for r in resp.data or []:
+        if r.get("costo") in (None, 0):
+            continue
+        categoria = tipos.get(r["tipo_mantenimiento_id"], {}).get("categoria") or "Otro"
+        acumulado[categoria] = acumulado.get(categoria, 0.0) + float(r["costo"])
+    return [{"categoria": k, "total": round(v, 2)} for k, v in sorted(acumulado.items())]
+
+
+# ==================== LECTURAS DE KILOMETRAJE ====================
+
+def registrar_lectura_km(vehiculo_id: int, kilometraje: int, fecha: str | None = None) -> None:
+    """Guarda una lectura de kilometraje (para el gráfico de historial)."""
+    supabase.table("lecturas_km").insert({
+        "vehiculo_id": vehiculo_id,
+        "kilometraje": kilometraje,
+        "fecha": fecha or _hoy(),
+    }).execute()
+
+
+def historial_km(vehiculo_id: int, limite: int = 100) -> list[dict]:
+    resp = (supabase.table("lecturas_km").select("fecha, kilometraje")
+            .eq("vehiculo_id", vehiculo_id)
+            .order("fecha").limit(limite).execute())
     return resp.data or []
 
 
