@@ -67,10 +67,19 @@ def _resumen_vehiculo(usuario: dict) -> dict:
     variante = db.obtener_variante(vehiculo["variante_id"])
     tipos = {t["id"]: t["nombre"] for t in db.listar_tipos_mantenimiento()}
 
-    proximos = [
-        {"nombre": r["nombre"], "estado": r["estado"], "km_restante": r["km_restante"]}
-        for r in mantenimiento.calcular_estado_vehiculo(vehiculo)
-    ]
+    # Próximos mantenimientos con el precio promedio de la comunidad.
+    promedios = db.promedios_por_tipo()
+    proximos = []
+    total_vencidos = 0.0
+    for r in mantenimiento.calcular_estado_vehiculo(vehiculo):
+        p = promedios.get(r["tipo_id"])
+        prom = p["promedio"] if p else None
+        proximos.append({
+            "nombre": r["nombre"], "estado": r["estado"], "km_restante": r["km_restante"],
+            "precio_promedio": prom, "conteo": p["conteo"] if p else 0,
+        })
+        if r["estado"] == "vencido" and prom:
+            total_vencidos += prom
     hist = [
         {"nombre": tipos.get(r["tipo_mantenimiento_id"], "-"),
          "fecha": r["fecha"], "creado_en": r.get("creado_en"),
@@ -96,6 +105,7 @@ def _resumen_vehiculo(usuario: dict) -> dict:
             "llantas": f"{variante['medida_llanta']} · {variante['presion_llantas']}",
         },
         "proximos": proximos,
+        "total_vencidos_estimado": round(total_vencidos, 2),
         "ultimos": hist[:5],
         "historial": hist,
         "gastos_por_categoria": gastos,

@@ -202,11 +202,17 @@ def _continuar_conversacion(chat_id, telegram_id, texto, estado, usuario) -> Non
             return
         datos["km"] = km
         db.guardar_estado(telegram_id, "mant_costo", datos)
-        tg.enviar_mensaje(chat_id, "¿Cuánto costó? (solo el número, ej. 35). Escribe 0 si no aplica.")
+        tg.enviar_mensaje(chat_id, "¿Cuánto costó? Escribe el valor en dólares, mayor a 0 (ej. 35).")
 
     elif paso == "mant_costo":
         costo = _a_numero(texto)
-        datos["costo"] = costo if costo is not None else 0
+        # El costo debe ser positivo y coherente (hasta $5000). Así el precio
+        # promedio de la comunidad no se distorsiona con ceros o errores de tipeo.
+        if costo is None or costo <= 0 or costo > 5000:
+            tg.enviar_mensaje(chat_id,
+                "El costo debe ser un valor en dólares mayor a 0 y hasta 5000 (ej. 35). Inténtalo de nuevo:")
+            return
+        datos["costo"] = round(costo, 2)
         db.guardar_estado(telegram_id, "mant_taller", datos)
         tg.enviar_mensaje(chat_id, "¿En qué taller? (o escribe '-' para dejarlo vacío)")
 

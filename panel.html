@@ -291,12 +291,26 @@ function vistaMant(c, d){
       <div class="card tile"><div class="k">Kilometraje</div><div class="v">${numf(d.vehiculo.kilometraje)} km</div></div>
       <div class="card tile"><div class="k">Mantenimientos</div><div class="v">${d.historial.length}</div></div>
     </div>
-    <div class="card"><h2>Semáforo de mantenimientos</h2><div id="sem"></div></div>
+    <div class="card"><h2>Semáforo de mantenimientos</h2><div id="sem"></div>
+      <div class="muted" style="font-size:12px;margin-top:8px">El "precio prom." es el promedio de lo que registran los usuarios para cada mantenimiento.</div></div>
+    <div class="card" style="border:2px solid var(--critical)">
+      <h2 style="color:var(--critical)">💰 Estimado para ponerte al día</h2>
+      <div class="tile"><div class="v">${money(d.total_vencidos_estimado||0)}</div></div>
+      <div class="muted" id="venc-nota"></div>
+    </div>
     <div class="card"><h2>Últimos 5 mantenimientos</h2>
       <div style="overflow-x:auto"><table><thead><tr><th>Descripción</th><th>Fecha</th><th>Hora reg.</th><th>Precio</th></tr></thead>
       <tbody id="tb-ult"></tbody></table></div><div id="ult-vacio" class="muted oculto">Aún no hay mantenimientos.</div></div>
     <div class="card"><h2>Historial de kilometraje</h2><canvas id="cv-km" height="200"></canvas><div id="km-vacio" class="muted oculto"></div></div>`;
   pintarSemaforo($('#sem'), d.proximos);
+  // Nota del recuadro de vencidos
+  const venc=(d.proximos||[]).filter(x=>x.estado==='vencido');
+  const sinDato=venc.filter(x=>x.precio_promedio==null).length;
+  let nota;
+  if(venc.length===0) nota='No tienes mantenimientos vencidos. 🟢';
+  else { nota=`Suma del precio promedio de ${venc.length} mantenimiento(s) vencido(s).`;
+    if(sinDato>0) nota+=` (${sinDato} aún sin datos de precio)`; }
+  $('#venc-nota').textContent=nota;
   const ult=d.ultimos||[];
   if(ult.length===0) $('#ult-vacio').classList.remove('oculto');
   else $('#tb-ult').innerHTML = ult.map(r=>`<tr><td>${r.nombre}</td><td>${r.fecha||'-'}</td><td>${horaDe(r.creado_en)}</td><td>${r.costo!=null?money(r.costo):'-'}</td></tr>`).join('');
@@ -304,15 +318,28 @@ function vistaMant(c, d){
 }
 function horaDe(ts){ if(!ts) return '-'; try{ return new Date(ts).toLocaleTimeString('es-EC',{hour:'2-digit',minute:'2-digit'}); }catch(e){ return '-'; } }
 
+function precioProm(r){
+  if(r.precio_promedio==null) return '<span class="muted">sin datos</span>';
+  return `<b>${money(r.precio_promedio)}</b> <span class="muted" style="font-size:11px">· ${r.conteo} reg.</span>`;
+}
 function pintarSemaforo(cont, proximos){
   const orden={vencido:0,proximo:1,al_dia:2};
   const items=(proximos||[]).slice().sort((a,b)=>orden[a.estado]-orden[b.estado]);
-  cont.innerHTML = items.map(r=>{
-    const p=r.estado==='vencido'?'p-critical':(r.estado==='proximo'?'p-warning':'p-good');
-    const et=r.estado==='vencido'?'Vencido':(r.estado==='proximo'?'Próximo':'Al día');
-    let det='sin datos'; if(r.km_restante!=null) det=r.km_restante<=0?`excedido ${Math.abs(r.km_restante)} km`:`faltan ${r.km_restante} km`;
-    return `<div class="sem"><span class="punto ${p}"></span><span style="flex:1">${r.nombre}</span><span class="muted">${det}</span><span class="chip">${et}</span></div>`;
-  }).join('');
+  cont.innerHTML =
+    `<div class="sem" style="border-bottom:2px solid var(--baseline)">
+       <span style="width:12px"></span><span style="flex:1" class="muted">Mantenimiento</span>
+       <span class="muted" style="min-width:150px;text-align:right">Precio prom.</span>
+       <span class="muted" style="min-width:110px;text-align:right">Estado (km)</span>
+       <span style="min-width:64px"></span></div>` +
+    items.map(r=>{
+      const p=r.estado==='vencido'?'p-critical':(r.estado==='proximo'?'p-warning':'p-good');
+      const et=r.estado==='vencido'?'Vencido':(r.estado==='proximo'?'Próximo':'Al día');
+      let det='sin datos'; if(r.km_restante!=null) det=r.km_restante<=0?`excedido ${Math.abs(r.km_restante)} km`:`faltan ${r.km_restante} km`;
+      return `<div class="sem"><span class="punto ${p}"></span><span style="flex:1">${r.nombre}</span>
+        <span style="min-width:150px;text-align:right">${precioProm(r)}</span>
+        <span class="muted" style="min-width:110px;text-align:right">${det}</span>
+        <span style="min-width:64px;text-align:right"><span class="chip">${et}</span></span></div>`;
+    }).join('');
 }
 function graficoKm(km){
   if(typeof Chart==='undefined' || km.length<2){

@@ -197,6 +197,29 @@ def historial(vehiculo_id: int, limite: int = 15) -> list[dict]:
     return resp.data or []
 
 
+def promedios_por_tipo(costo_max: float = 5000.0) -> dict:
+    """
+    Precio promedio de CADA tipo de mantenimiento, con los costos que registran
+    TODOS los usuarios. Ignora costos no positivos o exageradamente altos
+    (errores de tipeo). Devuelve {tipo_id: {"promedio": x, "conteo": n}}.
+    """
+    resp = supabase.table("mantenimientos").select("tipo_mantenimiento_id, costo").execute()
+    acumulado: dict[int, list[float]] = {}
+    for r in resp.data or []:
+        c = r.get("costo")
+        if c is None:
+            continue
+        try:
+            c = float(c)
+        except (TypeError, ValueError):
+            continue
+        if c <= 0 or c > costo_max:
+            continue
+        acumulado.setdefault(r["tipo_mantenimiento_id"], []).append(c)
+    return {t: {"promedio": round(sum(v) / len(v), 2), "conteo": len(v)}
+            for t, v in acumulado.items()}
+
+
 def gastos_por_categoria(vehiculo_id: int) -> list[dict]:
     """Suma los costos de los mantenimientos agrupados por categoría del control."""
     tipos = {t["id"]: t for t in listar_tipos_mantenimiento()}
