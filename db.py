@@ -46,6 +46,25 @@ def actualizar_usuario(usuario_id: int, cambios: dict) -> None:
     supabase.table("usuarios").update(cambios).eq("id", usuario_id).execute()
 
 
+def actualizar_clave_hash(usuario_id: int, clave_hash: str) -> None:
+    """Guarda la nueva contraseña ya cifrada (hash)."""
+    supabase.table("usuarios").update({"clave_hash": clave_hash}).eq("id", usuario_id).execute()
+
+
+def guardar_reset(usuario_id: int, codigo: str, expira_iso: str) -> None:
+    """Guarda el código temporal de recuperación y su vencimiento."""
+    supabase.table("usuarios").update(
+        {"reset_codigo": codigo, "reset_expira": expira_iso}
+    ).eq("id", usuario_id).execute()
+
+
+def limpiar_reset(usuario_id: int) -> None:
+    """Borra el código de recuperación (tras usarlo)."""
+    supabase.table("usuarios").update(
+        {"reset_codigo": None, "reset_expira": None}
+    ).eq("id", usuario_id).execute()
+
+
 def listar_usuarios_pendientes() -> list[dict]:
     resp = supabase.table("usuarios").select("*").eq("estado", "pendiente").execute()
     return resp.data or []

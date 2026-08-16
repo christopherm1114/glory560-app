@@ -65,10 +65,36 @@
   <p class="muted">Ingresa con tu número de teléfono.</p>
   <div class="field">Usuario (número de teléfono)</div>
   <input id="in-usuario" inputmode="tel" placeholder="Ej. 0999123456">
-  <div class="field">Contraseña (tu número de teléfono)</div>
-  <input id="in-clave" type="password" placeholder="Tu teléfono">
+  <div class="field">Contraseña</div>
+  <input id="in-clave" type="password" placeholder="Tu contraseña">
   <div id="login-error" class="muted oculto" style="color:var(--critical);margin-top:8px"></div>
   <button class="btn" style="width:100%;margin-top:14px" onclick="hacerLogin()">Entrar</button>
+  <div style="text-align:center;margin-top:12px"><a class="muted" style="cursor:pointer;text-decoration:underline" onclick="verRecuperar()">¿Olvidaste tu contraseña?</a></div>
+</div>
+
+<!-- ============ RECUPERAR CONTRASEÑA ============ -->
+<div id="recuperar" class="oculto" style="max-width:360px;margin:70px auto;padding:28px;background:var(--surface);border:1px solid var(--border);border-radius:14px">
+  <h1 style="font-size:19px;margin:0 0 6px">🔐 Recuperar contraseña</h1>
+  <!-- Paso 1 -->
+  <div id="rec-paso1">
+    <p class="muted">Escribe tu teléfono y te enviaremos un código por Telegram.</p>
+    <div class="field">Número de teléfono</div>
+    <input id="rec-tel" inputmode="tel" placeholder="Ej. 0999123456">
+    <button class="btn" style="width:100%;margin-top:12px" onclick="pedirCodigo()">Enviarme el código</button>
+  </div>
+  <!-- Paso 2 -->
+  <div id="rec-paso2" class="oculto">
+    <p class="muted">Revisa tu Telegram e ingresa el código de 6 dígitos.</p>
+    <div class="field">Código (vence en 10 minutos)</div>
+    <input id="rec-codigo" inputmode="numeric" maxlength="6" placeholder="______">
+    <div class="field">Nueva contraseña</div>
+    <input id="rec-nueva" type="password" placeholder="Mínimo 8, con letra y número">
+    <div class="field">Repetir nueva contraseña</div>
+    <input id="rec-rep" type="password">
+    <button class="btn" style="width:100%;margin-top:12px" onclick="confirmarRecuperacion()">Cambiar contraseña</button>
+  </div>
+  <div id="rec-msg" class="muted oculto" style="margin-top:10px"></div>
+  <div style="text-align:center;margin-top:12px"><a class="muted" style="cursor:pointer;text-decoration:underline" onclick="verLogin()">Volver al inicio de sesión</a></div>
 </div>
 
 <!-- ============ APP ============ -->
@@ -106,7 +132,41 @@ async function iniciar(){
   construirTabs();
   abrirTab(TABS[0].id);
 }
-function mostrarLogin(){ $('#app').classList.add('oculto'); $('#login').classList.remove('oculto'); }
+function mostrarLogin(){ $('#app').classList.add('oculto'); $('#recuperar').classList.add('oculto'); $('#login').classList.remove('oculto'); }
+
+// ---------- Recuperación de contraseña ----------
+function verRecuperar(){
+  $('#login').classList.add('oculto');
+  $('#recuperar').classList.remove('oculto');
+  $('#rec-paso1').classList.remove('oculto');
+  $('#rec-paso2').classList.add('oculto');
+  $('#rec-msg').classList.add('oculto');
+}
+function verLogin(){ $('#recuperar').classList.add('oculto'); $('#login').classList.remove('oculto'); }
+
+async function pedirCodigo(){
+  const telefono = $('#rec-tel').value.trim();
+  if(!telefono){ return; }
+  await fetch('/api/recuperar/solicitar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({telefono})});
+  // Siempre pasamos al paso 2 (no revelamos si el número existe).
+  $('#rec-paso1').classList.add('oculto');
+  $('#rec-paso2').classList.remove('oculto');
+  const m=$('#rec-msg'); m.classList.remove('oculto'); m.style.color='var(--ink2)';
+  m.textContent='Si el número está registrado, recibirás un código por Telegram.';
+}
+async function confirmarRecuperacion(){
+  const telefono=$('#rec-tel').value.trim(), codigo=$('#rec-codigo').value.trim();
+  const nueva=$('#rec-nueva').value, repetir=$('#rec-rep').value;
+  const r=await fetch('/api/recuperar/confirmar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({telefono,codigo,nueva,repetir})});
+  const m=$('#rec-msg'); m.classList.remove('oculto');
+  if(r.status===200){ m.style.color='var(--good)'; m.textContent='✓ Contraseña cambiada. Ya puedes iniciar sesión.'; setTimeout(verLogin, 1800); }
+  else { const d=await r.json(); m.style.color='var(--critical)'; m.textContent=mensajeError(d.error); }
+}
+function mensajeError(cod){
+  return ({codigo_invalido:'Código incorrecto.', codigo_expirado:'El código venció, pide uno nuevo.',
+    no_coinciden:'Las contraseñas no coinciden.', debil:'La contraseña debe tener mínimo 8 caracteres, con letra y número.',
+    actual_incorrecta:'La contraseña actual es incorrecta.'})[cod] || 'No se pudo completar.';
+}
 
 async function hacerLogin(){
   const usuario = $('#in-usuario').value.trim();
@@ -171,7 +231,22 @@ function vistaPerfil(c, d){
     <div class="muted" style="margin-top:6px">Cambiar motor/transmisión recalcula insumos e intervalos.</div>
     <button class="btn" style="margin-top:12px" onclick="guardarPerfil()">Guardar cambios</button>
     <span id="p-ok" class="muted oculto" style="color:var(--good);margin-left:10px">✓ Guardado</span>
+  </div>
+  <div class="card"><h2>🔒 Cambiar contraseña</h2>
+    <div class="field">Contraseña actual</div><input id="c-actual" type="password">
+    <div class="field">Nueva contraseña</div><input id="c-nueva" type="password">
+    <div class="muted" style="font-size:12px;margin-top:3px">Mínimo 8 caracteres, con al menos una letra y un número.</div>
+    <div class="field">Repetir nueva contraseña</div><input id="c-rep" type="password">
+    <button class="btn" style="margin-top:12px" onclick="cambiarClave()">Actualizar contraseña</button>
+    <div id="c-msg" class="muted oculto" style="margin-top:8px"></div>
   </div>`;
+}
+async function cambiarClave(){
+  const actual=$('#c-actual').value, nueva=$('#c-nueva').value, repetir=$('#c-rep').value;
+  const r=await fetch('/api/cambiar-clave',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({actual,nueva,repetir})});
+  const m=$('#c-msg'); m.classList.remove('oculto');
+  if(r.status===200){ m.style.color='var(--good)'; m.textContent='✓ Contraseña actualizada.'; $('#c-actual').value='';$('#c-nueva').value='';$('#c-rep').value=''; }
+  else { const d=await r.json(); m.style.color='var(--critical)'; m.textContent=mensajeError(d.error); }
 }
 async function guardarPerfil(){
   const cambios={ placa:$('#p-placa').value, anio:$('#p-anio').value, kilometraje:$('#p-km').value,

@@ -31,9 +31,12 @@ import os
 from fastapi import APIRouter, Request, Body
 from fastapi.responses import HTMLResponse, JSONResponse
 
+from datetime import datetime, timezone, timedelta
+
 import db
 import auth
 import mantenimiento
+import telegram as tg
 
 router = APIRouter()
 
@@ -135,6 +138,77 @@ def api_logout():
     resp = JSONResponse({"ok": True})
     resp.delete_cookie("sesion")
     return resp
+
+
+# ---------- Contraseña: cambiar (estando dentro) ----------
+
+@router.post("/api/cambiar-clave")
+def api_cambiar_clave(request: Request, datos: dict = Body(...)):
+    u = _usuario_actual(request)
+    if not u:
+        return JSONResponse({"error": "no_autenticado"}, status_code=401)
+    actual = datos.get("actual", "")
+    nueva = datos.get("nueva", "")
+    repetir = datos.get("repetir", "")
+    if not auth.verificar_credencial(u, actual):
+        return JSONResponse({"error": "actual_incorrecta"}, status_code=400)
+    if nueva != repetir:
+        return JSONResponse({"error": "no_coinciden"}, status_code=400)
+    if not auth.contrasena_valida(nueva):
+        return JSONResponse({"error": "debil"}, status_code=400)
+    db.actualizar_clave_hash(u["id"], auth.hash_password(nueva))
+    return {"ok": True}
+
+
+# ---------- Contraseña: recuperación por Telegram ----------
+
+@router.post("/api/recuperar/solicitar")
+def api_recuperar_solicitar(datos: dict = Body(...)):
+    """Envía un código de 6 dígitos por Telegram. Siempre responde 'ok'
+    (no revelamos si el teléfono existe o no)."""
+    tel = auth.normalizar_telefono(datos.get("telefono", ""))
+    persona = db.buscar_usuario_por_telefono_normalizado(tel)
+    if persona and persona.get("estado") == "aprobado" and persona.get("telegram_id"):
+        codigo = auth.generar_codigo()
+        expira = (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat()
+        db.guardar_reset(persona["id"], codigo, expira)
+        try:
+            tg.enviar_mensaje(
+                persona["telegram_id"],
+                "🔐 <b>Recuperación de contraseña</b>\n"
+                f"Tu código es <b>{codigo}</b>.\n"
+                "Vence en 10 minutos. Si no lo solicitaste, ignora este mensaje.")
+        except Exception as e:
+            print(f"[recuperar] no se pudo enviar el código: {e}")
+    return {"ok": True}
+
+
+@router.post("/api/recuperar/confirmar")
+def api_recuperar_confirmar(datos: dict = Body(...)):
+    tel = auth.normalizar_telefono(datos.get("telefono", ""))
+    codigo = str(datos.get("codigo", "")).strip()
+    nueva = datos.get("nueva", "")
+    repetir = datos.get("repetir", "")
+
+    persona = db.buscar_usuario_por_telefono_normalizado(tel)
+    if not persona:
+        return JSONResponse({"error": "codigo_invalido"}, status_code=400)
+    if not persona.get("reset_codigo") or persona["reset_codigo"] != codigo:
+        return JSONResponse({"error": "codigo_invalido"}, status_code=400)
+    # ¿Vigente?
+    try:
+        if datetime.fromisoformat(persona["reset_expira"]) < datetime.now(timezone.utc):
+            return JSONResponse({"error": "codigo_expirado"}, status_code=400)
+    except (ValueError, TypeError):
+        return JSONResponse({"error": "codigo_invalido"}, status_code=400)
+    if nueva != repetir:
+        return JSONResponse({"error": "no_coinciden"}, status_code=400)
+    if not auth.contrasena_valida(nueva):
+        return JSONResponse({"error": "debil"}, status_code=400)
+
+    db.actualizar_clave_hash(persona["id"], auth.hash_password(nueva))
+    db.limpiar_reset(persona["id"])
+    return {"ok": True}
 
 
 @router.get("/api/sesion")

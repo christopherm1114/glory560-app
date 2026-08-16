@@ -12,6 +12,7 @@ Todo con librerías estándar de Python (hashlib, hmac).
 
 import hashlib
 import hmac
+import secrets
 import time
 
 import db
@@ -21,6 +22,52 @@ from config import TELEGRAM_BOT_TOKEN
 def normalizar_telefono(valor: str) -> str:
     """Deja solo los dígitos, para que '+593 99...' y '09 9...' se comparen igual."""
     return "".join(c for c in str(valor or "") if c.isdigit())
+
+
+# ---------- Cifrado de contraseñas (hash PBKDF2) ----------
+
+def hash_password(contrasena: str) -> str:
+    """
+    Cifra la contraseña con PBKDF2-SHA256 y una 'sal' aleatoria.
+    Devuelve un texto 'pbkdf2_sha256$iteraciones$sal$hash' que se guarda en la BD.
+    Nunca se guarda la contraseña en texto plano.
+    """
+    sal = secrets.token_hex(16)
+    dk = hashlib.pbkdf2_hmac("sha256", contrasena.encode(), bytes.fromhex(sal), 120000)
+    return f"pbkdf2_sha256$120000${sal}${dk.hex()}"
+
+
+def verificar_password(contrasena: str, guardado: str) -> bool:
+    """Comprueba una contraseña contra su hash guardado."""
+    try:
+        _algo, iteraciones, sal, h = guardado.split("$")
+        dk = hashlib.pbkdf2_hmac("sha256", contrasena.encode(), bytes.fromhex(sal), int(iteraciones))
+        return hmac.compare_digest(dk.hex(), h)
+    except (ValueError, AttributeError):
+        return False
+
+
+def contrasena_valida(contrasena: str) -> bool:
+    """Requisito: mínimo 8 caracteres, con al menos una letra y un número."""
+    c = str(contrasena or "")
+    return len(c) >= 8 and any(x.isalpha() for x in c) and any(x.isdigit() for x in c)
+
+
+def generar_codigo() -> str:
+    """Genera un código de recuperación de 6 dígitos, aleatorio y seguro."""
+    return f"{secrets.randbelow(1000000):06d}"
+
+
+def verificar_credencial(persona: dict, contrasena: str) -> bool:
+    """
+    Verifica una contraseña contra la persona:
+      - Si ya tiene contraseña cifrada (clave_hash), la compara con el hash.
+      - Si aún no (usuario nuevo/heredado), la clave sigue siendo el teléfono.
+    """
+    ch = persona.get("clave_hash")
+    if ch:
+        return verificar_password(contrasena, ch)
+    return normalizar_telefono(persona.get("clave") or persona.get("telefono")) == normalizar_telefono(contrasena)
 
 
 # ---------- Login ----------
@@ -36,8 +83,7 @@ def validar_login(usuario: str, contrasena: str) -> dict | None:
         return None
     if persona.get("estado") != "aprobado":
         return None
-    # La clave guardada (por defecto el teléfono) debe coincidir.
-    if normalizar_telefono(persona.get("clave") or persona.get("telefono")) != normalizar_telefono(contrasena):
+    if not verificar_credencial(persona, contrasena):
         return None
     return persona
 
