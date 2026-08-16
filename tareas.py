@@ -1,13 +1,20 @@
 """
 tareas.py
 ---------
-Tareas programadas (se ejecutan solas, sin que nadie escriba al bot).
+Recordatorios automáticos (los llama cron-job.org).
 
-La principal es 'revisar_vencimientos': recorre todos los vehículos, calcula
-qué mantenimientos están vencidos o próximos, y envía un recordatorio por
-Telegram al dueño. El cron job de Render la ejecuta una vez al día.
+Lógica:
+  - Cada día a las 08:00 se envía un recordatorio pidiendo registrar el
+    kilometraje del vehículo (y se listan los mantenimientos pendientes).
+  - Mientras el usuario NO registre el kilometraje ESE día, se vuelve a
+    insistir cada 2 horas (según la frecuencia configurada en cron-job.org).
+  - Apenas el usuario registra el kilometraje (con /km en el bot o desde la
+    web), la app deja de insistir hasta el día siguiente.
 
-También se puede ejecutar a mano con:  python -m api.tareas
+La "señal" de que ya cumplió es el campo fecha_actualizacion_km del vehículo:
+si es igual a hoy, ya ingresó el kilometraje y no se le molesta más ese día.
+
+Se puede ejecutar a mano con:  python tareas.py
 """
 
 import db
@@ -16,43 +23,48 @@ import mantenimiento
 
 
 def revisar_vencimientos() -> int:
-    """Envía recordatorios y devuelve cuántas alertas mandó."""
-    enviadas = 0
+    """Envía los recordatorios pendientes y devuelve cuántos envió."""
+    hoy = db._hoy()
+    enviados = 0
+
     for vehiculo in db.listar_todos_los_vehiculos():
-        # Buscamos al dueño y verificamos que esté aprobado.
+        # 1) El dueño debe existir y estar aprobado.
         resp = db.supabase.table("usuarios").select("*").eq("id", vehiculo["usuario_id"]).execute()
         if not resp.data:
             continue
         usuario = resp.data[0]
-        if usuario["estado"] != "aprobado":
+        if usuario.get("estado") != "aprobado":
             continue
 
+        # 2) ¿Ya registró el kilometraje HOY? Si sí, no insistimos.
+        if str(vehiculo.get("fecha_actualizacion_km")) == hoy:
+            continue
+
+        # 3) Armamos el mensaje: recordar registrar el km + pendientes.
         estados = mantenimiento.calcular_estado_vehiculo(vehiculo)
-        # Solo nos interesan los que están vencidos o próximos.
         urgentes = [r for r in estados if r["estado"] in ("vencido", "proximo")]
-        if not urgentes:
-            continue
 
-        lineas = []
-        for r in urgentes:
-            # Para no repetir el mismo recordatorio a diario, saltamos los que
-            # ya tienen una alerta 'enviada'.
-            if db.alerta_reciente_existe(vehiculo["id"], r["tipo_id"]):
-                continue
-            lineas.append(mantenimiento.texto_estado(r))
-            db.crear_alerta(vehiculo["id"], r["tipo_id"], db._hoy())
+        placa = vehiculo.get("placa", "tu vehículo")
+        mensaje = (
+            "🔔 <b>Recordatorio diario</b>\n"
+            f"Registra el kilometraje de <b>{placa}</b> con "
+            "<code>/km &lt;número&gt;</code> para mantener tu control al día."
+        )
+        if urgentes:
+            lineas = "\n".join(mantenimiento.texto_estado(r) for r in urgentes)
+            mensaje += "\n\n⚠️ <b>Mantenimientos por atender:</b>\n" + lineas
+        else:
+            mensaje += "\n\n🟢 Por ahora no tienes mantenimientos vencidos."
 
-        if lineas:
-            tg.enviar_mensaje(usuario["telegram_id"],
-                "🔔 <b>Recordatorio de mantenimiento</b>\n"
-                f"Tu {vehiculo.get('placa','vehículo')} necesita atención:\n\n"
-                + "\n".join(lineas)
-                + "\n\nCuando lo hagas, regístralo con /registrar.")
-            enviadas += 1
-    return enviadas
+        try:
+            tg.enviar_mensaje(usuario["telegram_id"], mensaje)
+            enviados += 1
+        except Exception as e:
+            print(f"[tareas] No se pudo avisar al usuario {usuario.get('id')}: {e}")
+
+    return enviados
 
 
 if __name__ == "__main__":
-    # Esto se ejecuta cuando corremos: python -m api.tareas
     total = revisar_vencimientos()
     print(f"Recordatorios enviados: {total}")

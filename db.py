@@ -266,8 +266,14 @@ def limpiar_estado(telegram_id: int) -> None:
 
 # ==================== Ayudas de fecha ====================
 
+# Ecuador está en UTC-5 (todo el año, sin horario de verano).
+from datetime import timedelta as _timedelta
+_TZ_ECUADOR = timezone(_timedelta(hours=-5))
+
+
 def _hoy() -> str:
-    return datetime.now(timezone.utc).date().isoformat()
+    """Fecha de HOY en horario de Ecuador (para que 'hoy' sea el día local)."""
+    return datetime.now(_TZ_ECUADOR).date().isoformat()
 
 
 def _ahora_iso() -> str:
