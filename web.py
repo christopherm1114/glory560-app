@@ -129,7 +129,8 @@ def api_login(datos: dict = Body(...)):
         return JSONResponse({"error": "credenciales_invalidas"}, status_code=401)
     cookie = auth.crear_cookie_sesion(persona["id"])
     resp = JSONResponse({"ok": True, "rol": persona.get("rol", "usuario"), "nombre": persona["nombre"]})
-    resp.set_cookie("sesion", cookie, httponly=True, secure=True, samesite="lax", max_age=168 * 3600)
+    resp.set_cookie("sesion", cookie, httponly=True, secure=True, samesite="lax",
+                    max_age=auth.MINUTOS_SESION * 60)
     return resp
 
 
@@ -216,7 +217,12 @@ def api_sesion(request: Request):
     u = _usuario_actual(request)
     if not u:
         return JSONResponse({"error": "no_autenticado"}, status_code=401)
-    return {"nombre": u["nombre"], "rol": u.get("rol", "usuario"), "telefono": u["telefono"]}
+    # Renovamos la cookie (sesión "deslizante"): mientras el usuario esté
+    # activo, la app llama a esta ruta y la sesión se mantiene viva.
+    resp = JSONResponse({"nombre": u["nombre"], "rol": u.get("rol", "usuario"), "telefono": u["telefono"]})
+    resp.set_cookie("sesion", auth.crear_cookie_sesion(u["id"]), httponly=True, secure=True,
+                    samesite="lax", max_age=auth.MINUTOS_SESION * 60)
+    return resp
 
 
 # ---------- Datos del propio usuario ----------

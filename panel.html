@@ -131,8 +131,33 @@ async function iniciar(){
   $('#h-rol').textContent = SESION.rol === 'admin' ? '🛠️ Administrador' : '👤 Usuario';
   construirTabs();
   abrirTab(TABS[0].id);
+  iniciarInactividad();
 }
-function mostrarLogin(){ $('#app').classList.add('oculto'); $('#recuperar').classList.add('oculto'); $('#login').classList.remove('oculto'); }
+function mostrarLogin(){
+  $('#app').classList.add('oculto'); $('#recuperar').classList.add('oculto'); $('#login').classList.remove('oculto');
+  // Si venimos de un cierre por inactividad, avisamos.
+  if(new URLSearchParams(location.search).get('idle')==='1'){
+    const e=$('#login-error'); e.classList.remove('oculto'); e.style.color='var(--ink2)';
+    e.textContent='Tu sesión se cerró por inactividad. Vuelve a ingresar.';
+  }
+}
+
+// ---------- Cierre automático por inactividad (10 min) ----------
+const IDLE_MS = 10*60*1000;
+let idleTimer=null, heartbeat=null, huboActividad=false;
+function iniciarInactividad(){
+  ['mousemove','keydown','click','scroll','touchstart'].forEach(ev =>
+    document.addEventListener(ev, ()=>{ huboActividad=true; reiniciarIdle(); }, {passive:true}));
+  reiniciarIdle();
+  // Cada 3 minutos, si hubo actividad, renovamos la sesión en el servidor.
+  heartbeat = setInterval(()=>{ if(huboActividad){ huboActividad=false; fetch('/api/sesion').catch(()=>{}); } }, 3*60*1000);
+}
+function reiniciarIdle(){ clearTimeout(idleTimer); idleTimer=setTimeout(cerrarPorInactividad, IDLE_MS); }
+async function cerrarPorInactividad(){
+  clearInterval(heartbeat);
+  try{ await fetch('/api/logout',{method:'POST'}); }catch(e){}
+  location.href='/panel?idle=1';
+}
 
 // ---------- Recuperación de contraseña ----------
 function verRecuperar(){

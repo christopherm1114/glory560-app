@@ -90,9 +90,14 @@ def validar_login(usuario: str, contrasena: str) -> dict | None:
 
 # ---------- Cookie de sesión (firmada) ----------
 
-def crear_cookie_sesion(usuario_id: int, horas: int = 168) -> str:
-    """Crea un texto firmado 'usuario_id.expiracion.firma' (dura 7 días)."""
-    expira = int(time.time()) + horas * 3600
+# Minutos que dura la sesión SIN actividad. Se renueva en cada uso, así que
+# un usuario activo no se desconecta; si deja de usar la app, expira sola.
+MINUTOS_SESION = 12
+
+
+def crear_cookie_sesion(usuario_id: int, minutos: int = MINUTOS_SESION) -> str:
+    """Crea un texto firmado 'usuario_id.expiracion.firma' (sesión corta y deslizante)."""
+    expira = int(time.time()) + minutos * 60
     base = f"{usuario_id}.{expira}"
     firma = hmac.new(TELEGRAM_BOT_TOKEN.encode(), base.encode(), hashlib.sha256).hexdigest()
     return f"{base}.{firma}"
