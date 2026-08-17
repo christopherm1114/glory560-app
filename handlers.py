@@ -91,6 +91,8 @@ def _manejar_comando(chat_id, telegram_id, texto, usuario) -> None:
         _comando_registrar(chat_id, telegram_id, usuario)
     elif comando == "/historial":
         _comando_historial(chat_id, usuario)
+    elif comando == "/eliminar":
+        _comando_eliminar(chat_id, telegram_id, usuario)
     # --- Comandos de administrador ---
     elif comando in ("/aprobar", "/rechazar"):
         _comando_admin(chat_id, telegram_id, comando, args)
@@ -341,6 +343,10 @@ def _manejar_callback(callback: dict) -> None:
         db.guardar_estado(telegram_id, "mant_km", datos)
         tg.enviar_mensaje(chat_id, "¿A qué kilometraje se hizo? (ej. 45000)")
 
+    # --- Eliminar un mantenimiento mal registrado ---
+    elif dato.startswith("delmant:"):
+        _eliminar_mant_callback(chat_id, telegram_id, int(dato.split(":", 1)[1]))
+
 
 # =====================================================================
 # /perfil  y  MODIFICAR PERFIL
@@ -521,6 +527,42 @@ def _finalizar_registro_mantenimiento(chat_id, telegram_id, usuario, datos) -> N
         f"✅ Registrado: <b>{tipo['nombre']}</b> a los {datos['km']} km. ¡Gracias!")
 
 
+def _comando_eliminar(chat_id, telegram_id, usuario) -> None:
+    if not _exigir_aprobado(chat_id, usuario):
+        return
+    vehiculo = db.buscar_vehiculo_de_usuario(usuario["id"])
+    registros = db.historial(vehiculo["id"], 10)
+    if not registros:
+        tg.enviar_mensaje(chat_id, "No tienes mantenimientos registrados para eliminar.")
+        return
+    tipos = {t["id"]: t["nombre"] for t in db.listar_tipos_mantenimiento()}
+    filas = []
+    for r in registros:
+        nombre = tipos.get(r["tipo_mantenimiento_id"], "Mantenimiento")
+        etiqueta = f"❌ {nombre} · {r['kilometraje']} km · {r['fecha']}"
+        filas.append([(etiqueta, f"delmant:{r['id']}")])
+    tg.enviar_mensaje(chat_id,
+        "🗑️ Elige el mantenimiento que quieres <b>eliminar</b> (esta acción no se puede deshacer):",
+        teclado=tg.teclado_inline(filas))
+
+
+def _eliminar_mant_callback(chat_id, telegram_id, mant_id) -> None:
+    usuario = db.buscar_usuario_por_telegram(telegram_id)
+    if not usuario or usuario["estado"] != "aprobado":
+        return
+    vehiculo = db.buscar_vehiculo_de_usuario(usuario["id"])
+    m = db.obtener_mantenimiento(mant_id)
+    # Solo puede borrar mantenimientos de su propio vehículo.
+    if not m or not vehiculo or m["vehiculo_id"] != vehiculo["id"]:
+        tg.enviar_mensaje(chat_id, "No encontré ese mantenimiento (o no es de tu vehículo).")
+        return
+    tipo = db.obtener_tipo(m["tipo_mantenimiento_id"])
+    db.eliminar_mantenimiento(mant_id)
+    tg.enviar_mensaje(chat_id,
+        f"🗑️ Eliminado: <b>{tipo['nombre'] if tipo else 'mantenimiento'}</b> "
+        f"({m['kilometraje']} km). Listo.")
+
+
 def _comando_historial(chat_id, usuario) -> None:
     if not _exigir_aprobado(chat_id, usuario):
         return
@@ -547,6 +589,7 @@ def _comando_ayuda(chat_id, usuario) -> None:
              "/proximo — Próximos mantenimientos\n"
              "/km 46000 — Actualizar kilometraje\n"
              "/registrar — Anotar un mantenimiento realizado\n"
+             "/eliminar — Borrar un mantenimiento mal registrado\n"
              "/historial — Ver mantenimientos anteriores\n"
              "/cancelar — Cancelar la operación actual")
     if es_admin:

@@ -120,6 +120,8 @@ const money = n => '$' + Number(n||0).toLocaleString('es-EC',{minimumFractionDig
 const numf = n => Number(n||0).toLocaleString('es-EC');
 let SESION = null;   // {nombre, rol}
 let DATOS = null;    // mis-datos
+let TIPOS = null;    // catálogo de tipos de mantenimiento
+let REG_LISTA = [];  // mantenimientos registrados (viñeta)
 
 // ---------- Arranque: ¿hay sesión? ----------
 async function iniciar(){
@@ -207,6 +209,7 @@ let TABS = [];
 function construirTabs(){
   TABS = [
     {id:'perfil', txt:'Perfil'},
+    {id:'registrados', txt:'Mantenimientos registrados'},
     {id:'mant', txt:'Mantenimientos próximos'},
     {id:'insumos', txt:'Insumos vehiculares'},
   ];
@@ -228,6 +231,7 @@ async function abrirTab(id){
     if(id==='mant') vistaMant(c, DATOS);
     if(id==='insumos') vistaInsumos(c, DATOS);
   }
+  if(id==='registrados') vistaRegistrados(c);
   if(id==='aprob') vistaAprobaciones(c);
   if(id==='usuarios') vistaUsuarios(c);
   if(id==='roles') vistaRoles(c);
@@ -384,6 +388,71 @@ function vistaInsumos(c, d){
     ${fila('Refrigerante', v.refrigerante)}
     ${fila('Llantas', v.llantas)}
   </div>`;
+}
+
+// ---------- Vista: Mantenimientos registrados ----------
+async function vistaRegistrados(c){
+  if(!TIPOS){ const rt=await fetch('/api/tipos'); TIPOS=(await rt.json()).tipos||[]; }
+  const r=await fetch('/api/mantenimientos'); REG_LISTA=(await r.json()).mantenimientos||[];
+  const opts='<option value="">Todos los tipos</option>'+TIPOS.map(t=>`<option value="${t.id}">${t.nombre}</option>`).join('');
+  c.innerHTML=`<div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+      <h2 style="margin:0">Mantenimientos registrados</h2>
+      <button class="btn" onclick="abrirFormMant()">➕ Registrar</button>
+    </div>
+    <div style="margin-top:10px;max-width:320px"><div class="field">Filtrar por tipo</div>
+      <select id="reg-filtro" onchange="pintarRegistrados()">${opts}</select></div>
+    <div style="overflow-x:auto;margin-top:12px"><table>
+      <thead><tr><th>Mantenimiento</th><th>Fecha</th><th>Hora</th><th>Km</th><th>Costo</th><th>Taller</th><th></th></tr></thead>
+      <tbody id="reg-tbody"></tbody></table></div>
+    <div id="reg-vacio" class="muted oculto" style="margin-top:8px">No hay mantenimientos registrados.</div>
+  </div>`;
+  pintarRegistrados();
+}
+function pintarRegistrados(){
+  const f=$('#reg-filtro')?$('#reg-filtro').value:'';
+  const items=REG_LISTA.filter(x=>!f || String(x.tipo_id)===f);
+  const tb=$('#reg-tbody');
+  if(items.length===0){ tb.innerHTML=''; $('#reg-vacio').classList.remove('oculto'); return; }
+  $('#reg-vacio').classList.add('oculto');
+  tb.innerHTML=items.map(x=>`<tr>
+    <td>${x.nombre}</td><td>${x.fecha||'-'}</td><td>${horaDe(x.creado_en)}</td>
+    <td>${numf(x.km)}</td><td>${x.costo!=null?money(x.costo):'-'}</td><td>${x.taller||'-'}</td>
+    <td style="text-align:right"><button class="btn no sm" title="Eliminar" onclick="eliminarMant(${x.id})">🗑</button></td></tr>`).join('');
+}
+async function eliminarMant(id){
+  if(!confirm('¿Eliminar este mantenimiento? Esta acción no se puede deshacer.')) return;
+  await fetch('/api/mantenimiento/eliminar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})});
+  DATOS=null;                     // refrescar próximos/gastos la próxima vez
+  vistaRegistrados($('#contenido'));
+}
+function abrirFormMant(){
+  const opts=TIPOS.map(t=>`<option value="${t.id}">${t.nombre}</option>`).join('');
+  $('#modal-cont').innerHTML=`
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <h2 style="margin:0">➕ Registrar mantenimiento</h2>
+      <button class="btn ghost sm" onclick="cerrarModal()">✕ Cerrar</button></div>
+    <div class="field">Tipo de mantenimiento</div><select id="fm-tipo">${opts}</select>
+    <div class="grid2">
+      <div><div class="field">Kilometraje</div><input id="fm-km" inputmode="numeric" placeholder="Ej. 46000"></div>
+      <div><div class="field">Costo (USD)</div><input id="fm-costo" inputmode="decimal" placeholder="Mayor a 0"></div>
+    </div>
+    <div class="grid2">
+      <div><div class="field">Fecha</div><input id="fm-fecha" type="date"></div>
+      <div><div class="field">Taller (opcional)</div><input id="fm-taller"></div>
+    </div>
+    <div id="fm-msg" class="muted oculto" style="margin-top:8px"></div>
+    <button class="btn" style="margin-top:12px" onclick="guardarMant()">Guardar</button>`;
+  $('#modal').classList.remove('oculto');
+}
+async function guardarMant(){
+  const cuerpo={ tipo_id:$('#fm-tipo').value, km:$('#fm-km').value, costo:$('#fm-costo').value,
+    fecha:$('#fm-fecha').value, taller:$('#fm-taller').value };
+  const r=await fetch('/api/mantenimiento/crear',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(cuerpo)});
+  const m=$('#fm-msg'); m.classList.remove('oculto');
+  if(r.status===200){ cerrarModal(); DATOS=null; vistaRegistrados($('#contenido')); }
+  else { const d=await r.json(); m.style.color='var(--critical)';
+    m.textContent=({costo_invalido:'El costo debe ser en dólares, mayor a 0 y hasta 5000.',km_invalido:'Kilometraje inválido.',tipo_invalido:'Elige un tipo de mantenimiento.'})[d.error]||'No se pudo guardar.'; }
 }
 
 // ---------- Vista admin: Aprobaciones ----------

@@ -282,6 +282,88 @@ def api_perfil(request: Request, cambios: dict = Body(...)):
     return {"ok": True}
 
 
+# ---------- Mantenimientos registrados (listar / crear / eliminar) ----------
+
+import re as _re
+
+@router.get("/api/tipos")
+def api_tipos(request: Request):
+    if not _usuario_actual(request):
+        return JSONResponse({"error": "no_autenticado"}, status_code=401)
+    return {"tipos": [{"id": t["id"], "nombre": t["nombre"]} for t in db.listar_tipos_mantenimiento()]}
+
+
+@router.get("/api/mantenimientos")
+def api_mantenimientos(request: Request):
+    u = _usuario_actual(request)
+    if not u:
+        return JSONResponse({"error": "no_autenticado"}, status_code=401)
+    vehiculo = db.buscar_vehiculo_de_usuario(u["id"])
+    if not vehiculo:
+        return {"mantenimientos": []}
+    tipos = {t["id"]: t["nombre"] for t in db.listar_tipos_mantenimiento()}
+    lista = [{
+        "id": r["id"], "tipo_id": r["tipo_mantenimiento_id"],
+        "nombre": tipos.get(r["tipo_mantenimiento_id"], "-"),
+        "fecha": r["fecha"], "creado_en": r.get("creado_en"),
+        "km": r["kilometraje"], "costo": r.get("costo"), "taller": r.get("taller"),
+    } for r in db.historial(vehiculo["id"], 200)]
+    return {"mantenimientos": lista}
+
+
+@router.post("/api/mantenimiento/crear")
+def api_mant_crear(request: Request, datos: dict = Body(...)):
+    u = _usuario_actual(request)
+    if not u:
+        return JSONResponse({"error": "no_autenticado"}, status_code=401)
+    vehiculo = db.buscar_vehiculo_de_usuario(u["id"])
+    if not vehiculo:
+        return JSONResponse({"error": "sin_vehiculo"}, status_code=404)
+    try:
+        tipo_id = int(datos.get("tipo_id"))
+    except (TypeError, ValueError):
+        return JSONResponse({"error": "tipo_invalido"}, status_code=400)
+    try:
+        km = int(datos.get("km"))
+    except (TypeError, ValueError):
+        return JSONResponse({"error": "km_invalido"}, status_code=400)
+    try:
+        costo = float(datos.get("costo"))
+    except (TypeError, ValueError):
+        return JSONResponse({"error": "costo_invalido"}, status_code=400)
+    if costo <= 0 or costo > 5000:
+        return JSONResponse({"error": "costo_invalido"}, status_code=400)
+    fecha = datos.get("fecha") or ""
+    if not _re.match(r"^\d{4}-\d{2}-\d{2}$", fecha):
+        fecha = db._hoy()
+    taller = (datos.get("taller") or "").strip() or None
+
+    db.crear_mantenimiento(vehiculo["id"], tipo_id, fecha, km, round(costo, 2), taller, None)
+    if km > (vehiculo.get("kilometraje_actual") or 0):
+        db.actualizar_vehiculo(vehiculo["id"], {"kilometraje_actual": km, "fecha_actualizacion_km": db._hoy()})
+        db.registrar_lectura_km(vehiculo["id"], km)
+    return {"ok": True}
+
+
+@router.post("/api/mantenimiento/eliminar")
+def api_mant_eliminar(request: Request, datos: dict = Body(...)):
+    u = _usuario_actual(request)
+    if not u:
+        return JSONResponse({"error": "no_autenticado"}, status_code=401)
+    vehiculo = db.buscar_vehiculo_de_usuario(u["id"])
+    if not vehiculo:
+        return JSONResponse({"error": "sin_vehiculo"}, status_code=404)
+    try:
+        m = db.obtener_mantenimiento(int(datos.get("id")))
+    except (TypeError, ValueError):
+        return JSONResponse({"error": "id_invalido"}, status_code=400)
+    # Solo puede borrar mantenimientos de SU propio vehículo.
+    if not m or m["vehiculo_id"] != vehiculo["id"]:
+        return JSONResponse({"error": "no_encontrado"}, status_code=404)
+    db.eliminar_mantenimiento(m["id"])
+    return {"ok": True}
+
+
 # ---------- Administrador ----------
 
 @router.get("/api/aprobaciones")

@@ -181,6 +181,15 @@ def crear_mantenimiento(vehiculo_id: int, tipo_id: int, fecha: str, kilometraje:
     return resp.data[0]
 
 
+def obtener_mantenimiento(mant_id: int) -> dict | None:
+    resp = supabase.table("mantenimientos").select("*").eq("id", mant_id).execute()
+    return resp.data[0] if resp.data else None
+
+
+def eliminar_mantenimiento(mant_id: int) -> None:
+    supabase.table("mantenimientos").delete().eq("id", mant_id).execute()
+
+
 def ultimo_mantenimiento(vehiculo_id: int, tipo_id: int) -> dict | None:
     """El mantenimiento más reciente (por km) de ese tipo para ese vehículo."""
     resp = (supabase.table("mantenimientos").select("*")
