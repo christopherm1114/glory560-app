@@ -65,18 +65,23 @@ def _resumen_vehiculo(usuario: dict) -> dict:
     if not vehiculo:
         return {"vehiculo": None}
     variante = db.obtener_variante(vehiculo["variante_id"])
-    tipos = {t["id"]: t["nombre"] for t in db.listar_tipos_mantenimiento()}
+    tipos_full = {t["id"]: t for t in db.listar_tipos_mantenimiento()}
+    tipos = {i: t["nombre"] for i, t in tipos_full.items()}
 
-    # Próximos mantenimientos con el precio promedio de la comunidad.
+    # Próximos mantenimientos con el precio promedio de la comunidad
+    # y el precio de mercado referencial.
     promedios = db.promedios_por_tipo()
     proximos = []
     total_vencidos = 0.0
     for r in mantenimiento.calcular_estado_vehiculo(vehiculo):
         p = promedios.get(r["tipo_id"])
         prom = p["promedio"] if p else None
+        t = tipos_full.get(r["tipo_id"], {})
         proximos.append({
             "nombre": r["nombre"], "estado": r["estado"], "km_restante": r["km_restante"],
             "precio_promedio": prom, "conteo": p["conteo"] if p else 0,
+            "mercado_min": t.get("mercado_min"), "mercado_max": t.get("mercado_max"),
+            "mercado_nota": t.get("mercado_nota"),
         })
         if r["estado"] == "vencido" and prom:
             total_vencidos += prom

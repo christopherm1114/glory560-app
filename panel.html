@@ -292,7 +292,7 @@ function vistaMant(c, d){
       <div class="card tile"><div class="k">Mantenimientos</div><div class="v">${d.historial.length}</div></div>
     </div>
     <div class="card"><h2>Semáforo de mantenimientos</h2><div id="sem"></div>
-      <div class="muted" style="font-size:12px;margin-top:8px">El "precio prom." es el promedio de lo que registran los usuarios para cada mantenimiento.</div></div>
+      <div class="muted" style="font-size:12px;margin-top:8px">"Precio registrado por usuarios" es el promedio de lo que registran los usuarios. "Precio Mercado" muestra un rango referencial del mercado.</div></div>
     <div class="card" style="border:2px solid var(--critical)">
       <h2 style="color:var(--critical)">💰 Estimado para ponerte al día</h2>
       <div class="tile"><div class="v">${money(d.total_vencidos_estimado||0)}</div></div>
@@ -322,23 +322,43 @@ function precioProm(r){
   if(r.precio_promedio==null) return '<span class="muted">sin datos</span>';
   return `<b>${money(r.precio_promedio)}</b> <span class="muted" style="font-size:11px">· ${r.conteo} reg.</span>`;
 }
+function verMercado(nombre, min, max, notaEnc){
+  const nota = notaEnc ? decodeURIComponent(notaEnc) : '';
+  let cuerpo;
+  if(min==null && max==null){
+    cuerpo='<p class="muted">Aún no hay rango de referencia cargado para este mantenimiento.</p>';
+  } else {
+    cuerpo=`<div class="tile"><div class="k">Rango de mercado (referencial)</div><div class="v">${money(min)} – ${money(max)}</div></div>`
+      + (nota?`<p class="muted" style="margin-top:10px">${nota}</p>`:'');
+  }
+  $('#modal-cont').innerHTML=`
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <h2 style="margin:0">🏷️ Precio de mercado — ${nombre}</h2>
+      <button class="btn ghost sm" onclick="cerrarModal()">✕ Cerrar</button></div>
+    <div style="margin-top:12px">${cuerpo}</div>
+    <p class="muted" style="margin-top:14px;font-size:12px">Valores referenciales del mercado en Ecuador (USD). Pueden variar según el taller, la ciudad y la marca de los repuestos.</p>`;
+  $('#modal').classList.remove('oculto');
+}
 function pintarSemaforo(cont, proximos){
   const orden={vencido:0,proximo:1,al_dia:2};
   const items=(proximos||[]).slice().sort((a,b)=>orden[a.estado]-orden[b.estado]);
   cont.innerHTML =
     `<div class="sem" style="border-bottom:2px solid var(--baseline)">
        <span style="width:12px"></span><span style="flex:1" class="muted">Mantenimiento</span>
-       <span class="muted" style="min-width:150px;text-align:right">Precio prom.</span>
-       <span class="muted" style="min-width:110px;text-align:right">Estado (km)</span>
-       <span style="min-width:64px"></span></div>` +
+       <span class="muted" style="min-width:150px;text-align:right">Precio registrado por usuarios</span>
+       <span class="muted" style="min-width:100px;text-align:right">Estado (km)</span>
+       <span class="muted" style="min-width:120px;text-align:right">Mercado</span></div>` +
     items.map(r=>{
       const p=r.estado==='vencido'?'p-critical':(r.estado==='proximo'?'p-warning':'p-good');
       const et=r.estado==='vencido'?'Vencido':(r.estado==='proximo'?'Próximo':'Al día');
       let det='sin datos'; if(r.km_restante!=null) det=r.km_restante<=0?`excedido ${Math.abs(r.km_restante)} km`:`faltan ${r.km_restante} km`;
+      const nom=(r.nombre||'').replace(/'/g,"\\'");
+      const mn=r.mercado_min!=null?r.mercado_min:'null', mx=r.mercado_max!=null?r.mercado_max:'null';
+      const notaEnc=encodeURIComponent(r.mercado_nota||'');
       return `<div class="sem"><span class="punto ${p}"></span><span style="flex:1">${r.nombre}</span>
         <span style="min-width:150px;text-align:right">${precioProm(r)}</span>
-        <span class="muted" style="min-width:110px;text-align:right">${det}</span>
-        <span style="min-width:64px;text-align:right"><span class="chip">${et}</span></span></div>`;
+        <span class="muted" style="min-width:100px;text-align:right">${det} <span class="chip">${et}</span></span>
+        <span style="min-width:120px;text-align:right"><button class="btn ghost sm" onclick="verMercado('${nom}', ${mn}, ${mx}, '${notaEnc}')">Precio Mercado</button></span></div>`;
     }).join('');
 }
 function graficoKm(km){
