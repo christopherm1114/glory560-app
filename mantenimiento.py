@@ -40,21 +40,31 @@ def calcular_estado_vehiculo(vehiculo: dict) -> list[dict]:
     variante_id = vehiculo["variante_id"]
     km_actual = vehiculo.get("kilometraje_actual") or 0
 
-    # Diccionario id_tipo -> nombre para mostrar bonito.
+    # Diccionario id_tipo -> tipo (para nombre, categoría, clase).
     tipos = {t["id"]: t for t in db.listar_tipos_mantenimiento()}
+
+    # Traemos TODOS los mantenimientos del vehículo de una sola vez (en lugar de
+    # una consulta por cada control) y guardamos el ÚLTIMO de cada tipo por km.
+    ultimos: dict = {}
+    for m in db.historial(vehiculo["id"], 500):
+        tid = m["tipo_mantenimiento_id"]
+        prev = ultimos.get(tid)
+        if prev is None or (m.get("kilometraje") or 0) > (prev.get("kilometraje") or 0):
+            ultimos[tid] = m
 
     resultados = []
     for intervalo in db.intervalos_de_variante(variante_id):
         tipo_id = intervalo["tipo_mantenimiento_id"]
         tipo = tipos.get(tipo_id, {})
         nombre = tipo.get("nombre", f"Control {tipo_id}")
-        categoria = tipo.get("categoria", "")
+        categoria = tipo.get("categoria", "") or "Otros"
+        clase = tipo.get("clase", "reemplazo")
 
         intervalo_km = intervalo.get("intervalo_km")
         intervalo_meses = intervalo.get("intervalo_meses")
 
-        # ¿Cuándo se hizo por última vez?
-        ultimo = db.ultimo_mantenimiento(vehiculo["id"], tipo_id)
+        # ¿Cuándo se hizo por última vez? (del diccionario, sin consultar la BD)
+        ultimo = ultimos.get(tipo_id)
         if ultimo:
             km_base = ultimo.get("kilometraje") or 0
             fecha_base = _a_fecha(ultimo.get("fecha"))
@@ -90,6 +100,7 @@ def calcular_estado_vehiculo(vehiculo: dict) -> list[dict]:
             "tipo_id": tipo_id,
             "nombre": nombre,
             "categoria": categoria,
+            "clase": clase,
             "estado": estado,
             "km_restante": km_restante,
             "dias_restantes": dias_restantes,

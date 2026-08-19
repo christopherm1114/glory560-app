@@ -79,6 +79,7 @@ def _resumen_vehiculo(usuario: dict) -> dict:
         t = tipos_full.get(r["tipo_id"], {})
         proximos.append({
             "nombre": r["nombre"], "estado": r["estado"], "km_restante": r["km_restante"],
+            "categoria": r.get("categoria", "Otros"), "clase": r.get("clase", "reemplazo"),
             "precio_promedio": prom, "conteo": p["conteo"] if p else 0,
             "mercado_min": t.get("mercado_min"), "mercado_max": t.get("mercado_max"),
             "mercado_nota": t.get("mercado_nota"),

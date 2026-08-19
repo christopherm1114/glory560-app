@@ -343,27 +343,45 @@ function verMercado(nombre, min, max, notaEnc){
     <p class="muted" style="margin-top:14px;font-size:12px">Valores referenciales del mercado en Ecuador (USD). Pueden variar según el taller, la ciudad y la marca de los repuestos.</p>`;
   $('#modal').classList.remove('oculto');
 }
+const ORDEN_CAT=['Motor','Transmisión','Frenos','Suspensión','Dirección','Chasis','Eléctrico','A/C','Seguridad','Carrocería','Otros'];
+function filaSemaforo(r){
+  const p=r.estado==='vencido'?'p-critical':(r.estado==='proximo'?'p-warning':'p-good');
+  const et=r.estado==='vencido'?'Vencido':(r.estado==='proximo'?'Próximo':'Al día');
+  let det='sin datos'; if(r.km_restante!=null) det=r.km_restante<=0?`excedido ${Math.abs(r.km_restante)} km`:`faltan ${r.km_restante} km`;
+  const esInsp = r.clase==='inspeccion';
+  const colPrecio = esInsp ? '<span class="muted" style="font-size:12px">Revisión</span>' : precioProm(r);
+  let colMercado;
+  if(esInsp){ colMercado='<span class="muted" style="font-size:11px">—</span>'; }
+  else {
+    const nom=(r.nombre||'').replace(/'/g,"\\'");
+    const mn=r.mercado_min!=null?r.mercado_min:'null', mx=r.mercado_max!=null?r.mercado_max:'null';
+    const notaEnc=encodeURIComponent(r.mercado_nota||'');
+    colMercado=`<button class="btn ghost sm" onclick="verMercado('${nom}', ${mn}, ${mx}, '${notaEnc}')">Precio Mercado</button>`;
+  }
+  return `<div class="sem"><span class="punto ${p}"></span><span style="flex:1">${r.nombre}</span>
+    <span style="min-width:150px;text-align:right">${colPrecio}</span>
+    <span class="muted" style="min-width:100px;text-align:right">${det} <span class="chip">${et}</span></span>
+    <span style="min-width:120px;text-align:right">${colMercado}</span></div>`;
+}
 function pintarSemaforo(cont, proximos){
   const orden={vencido:0,proximo:1,al_dia:2};
-  const items=(proximos||[]).slice().sort((a,b)=>orden[a.estado]-orden[b.estado]);
-  cont.innerHTML =
-    `<div class="sem" style="border-bottom:2px solid var(--baseline)">
-       <span style="width:12px"></span><span style="flex:1" class="muted">Mantenimiento</span>
-       <span class="muted" style="min-width:150px;text-align:right">Precio registrado por usuarios</span>
-       <span class="muted" style="min-width:100px;text-align:right">Estado (km)</span>
-       <span class="muted" style="min-width:120px;text-align:right">Mercado</span></div>` +
-    items.map(r=>{
-      const p=r.estado==='vencido'?'p-critical':(r.estado==='proximo'?'p-warning':'p-good');
-      const et=r.estado==='vencido'?'Vencido':(r.estado==='proximo'?'Próximo':'Al día');
-      let det='sin datos'; if(r.km_restante!=null) det=r.km_restante<=0?`excedido ${Math.abs(r.km_restante)} km`:`faltan ${r.km_restante} km`;
-      const nom=(r.nombre||'').replace(/'/g,"\\'");
-      const mn=r.mercado_min!=null?r.mercado_min:'null', mx=r.mercado_max!=null?r.mercado_max:'null';
-      const notaEnc=encodeURIComponent(r.mercado_nota||'');
-      return `<div class="sem"><span class="punto ${p}"></span><span style="flex:1">${r.nombre}</span>
-        <span style="min-width:150px;text-align:right">${precioProm(r)}</span>
-        <span class="muted" style="min-width:100px;text-align:right">${det} <span class="chip">${et}</span></span>
-        <span style="min-width:120px;text-align:right"><button class="btn ghost sm" onclick="verMercado('${nom}', ${mn}, ${mx}, '${notaEnc}')">Precio Mercado</button></span></div>`;
-    }).join('');
+  const grupos={};
+  (proximos||[]).forEach(r=>{ const c=r.categoria||'Otros'; (grupos[c]=grupos[c]||[]).push(r); });
+  const cats=Object.keys(grupos).sort((a,b)=>{
+    const ia=ORDEN_CAT.indexOf(a), ib=ORDEN_CAT.indexOf(b);
+    return (ia<0?99:ia)-(ib<0?99:ib);
+  });
+  let html=`<div class="sem" style="border-bottom:2px solid var(--baseline)">
+      <span style="width:12px"></span><span style="flex:1" class="muted">Mantenimiento</span>
+      <span class="muted" style="min-width:150px;text-align:right">Precio registrado por usuarios</span>
+      <span class="muted" style="min-width:100px;text-align:right">Estado (km)</span>
+      <span class="muted" style="min-width:120px;text-align:right">Mercado</span></div>`;
+  cats.forEach(cat=>{
+    const lista=grupos[cat].slice().sort((a,b)=>orden[a.estado]-orden[b.estado]);
+    html+=`<div style="margin-top:12px;font-size:12px;font-weight:700;color:var(--brand);text-transform:uppercase;letter-spacing:.03em">${cat}</div>`;
+    html+=lista.map(filaSemaforo).join('');
+  });
+  cont.innerHTML=html;
 }
 function graficoKm(km){
   if(typeof Chart==='undefined' || km.length<2){
