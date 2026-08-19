@@ -212,6 +212,7 @@ function construirTabs(){
     {id:'registrados', txt:'Mantenimientos registrados'},
     {id:'mant', txt:'Mantenimientos próximos'},
     {id:'insumos', txt:'Insumos vehiculares'},
+    {id:'recom', txt:'Recomendaciones'},
   ];
   if(SESION.rol==='admin'){
     TABS.push({id:'aprob', txt:'Aprobaciones'});
@@ -225,11 +226,12 @@ function marcarTab(id){ document.querySelectorAll('.tab').forEach(b=>b.classList
 async function abrirTab(id){
   marcarTab(id);
   const c = $('#contenido');
-  if(['perfil','mant','insumos'].includes(id)){
+  if(['perfil','mant','insumos','recom'].includes(id)){
     if(!DATOS){ const r=await fetch('/api/mis-datos'); DATOS=await r.json(); }
     if(id==='perfil') vistaPerfil(c, DATOS);
     if(id==='mant') vistaMant(c, DATOS);
     if(id==='insumos') vistaInsumos(c, DATOS);
+    if(id==='recom') vistaRecom(c, DATOS);
   }
   if(id==='registrados') vistaRegistrados(c);
   if(id==='aprob') vistaAprobaciones(c);
@@ -406,6 +408,26 @@ function vistaInsumos(c, d){
     ${fila('Refrigerante', v.refrigerante)}
     ${fila('Llantas', v.llantas)}
   </div>`;
+}
+
+// ---------- Vista: Recomendaciones (tips de revisión) ----------
+function vistaRecom(c, d){
+  const items=d.recomendaciones||[];
+  if(items.length===0){ c.innerHTML='<div class="card"><h2>💡 Recomendaciones</h2><div class="muted">No hay recomendaciones cargadas.</div></div>'; return; }
+  const grupos={}; items.forEach(r=>{(grupos[r.categoria||'Otros']=grupos[r.categoria||'Otros']||[]).push(r);});
+  const cats=Object.keys(grupos).sort((a,b)=>{const ia=ORDEN_CAT.indexOf(a),ib=ORDEN_CAT.indexOf(b);return (ia<0?99:ia)-(ib<0?99:ib);});
+  let html='<div class="card"><h2>💡 Recomendaciones para el conductor</h2>'
+    +'<div class="muted" style="margin-bottom:6px">Chequeos periódicos para tener presentes y mantener tu Glory 560 en buen estado.</div>';
+  cats.forEach(cat=>{
+    html+=`<div style="margin-top:12px;font-size:12px;font-weight:700;color:var(--brand);text-transform:uppercase">${cat}</div>`;
+    grupos[cat].forEach(r=>{
+      const cada = r.intervalo_km ? `cada ${numf(r.intervalo_km)} km` : (r.intervalo_meses?`cada ${r.intervalo_meses} meses`:'periódicamente');
+      html+=`<div class="sem"><span class="punto p-good"></span>
+        <span style="flex:1">Recuerda que <b>${r.nombre}</b> se lo revisa ${cada}.${r.descripcion?` <span class="muted">${r.descripcion}</span>`:''}</span></div>`;
+    });
+  });
+  html+='</div>';
+  c.innerHTML=html;
 }
 
 // ---------- Vista: Mantenimientos registrados ----------

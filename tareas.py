@@ -17,6 +17,8 @@ si es igual a hoy, ya ingresó el kilometraje y no se le molesta más ese día.
 Se puede ejecutar a mano con:  python tareas.py
 """
 
+import random
+
 import db
 import telegram as tg
 import mantenimiento
@@ -55,6 +57,14 @@ def revisar_vencimientos() -> int:
             mensaje += "\n\n⚠️ <b>Mantenimientos por atender:</b>\n" + lineas
         else:
             mensaje += "\n\n🟢 Por ahora no tienes mantenimientos vencidos."
+
+        # Tip aleatorio del día (de las recomendaciones de revisión).
+        tips = [r for r in estados if r.get("clase") == "inspeccion" and r.get("intervalo_km")]
+        if tips:
+            t = random.choice(tips)
+            km_txt = f"{t['intervalo_km']:,}".replace(",", ".")
+            mensaje += (f"\n\n💡 <b>Tip del día:</b> recuerda que <b>{t['nombre']}</b> "
+                        f"se lo revisa cada {km_txt} km. ¡Un buen conductor lo tiene presente! 🚗")
 
         try:
             tg.enviar_mensaje(usuario["telegram_id"], mensaje)

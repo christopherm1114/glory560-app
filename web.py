@@ -68,18 +68,26 @@ def _resumen_vehiculo(usuario: dict) -> dict:
     tipos_full = {t["id"]: t for t in db.listar_tipos_mantenimiento()}
     tipos = {i: t["nombre"] for i, t in tipos_full.items()}
 
-    # Próximos mantenimientos con el precio promedio de la comunidad
-    # y el precio de mercado referencial.
+    # Separamos: los de 'reemplazo' van al semáforo (con precios); los de
+    # 'inspeccion' van a Recomendaciones (tips de revisión, sin precio).
     promedios = db.promedios_por_tipo()
     proximos = []
+    recomendaciones = []
     total_vencidos = 0.0
     for r in mantenimiento.calcular_estado_vehiculo(vehiculo):
+        t = tipos_full.get(r["tipo_id"], {})
+        if r.get("clase") == "inspeccion":
+            recomendaciones.append({
+                "nombre": r["nombre"], "categoria": r.get("categoria", "Otros"),
+                "intervalo_km": r.get("intervalo_km"), "intervalo_meses": r.get("intervalo_meses"),
+                "descripcion": t.get("descripcion"),
+            })
+            continue
         p = promedios.get(r["tipo_id"])
         prom = p["promedio"] if p else None
-        t = tipos_full.get(r["tipo_id"], {})
         proximos.append({
             "nombre": r["nombre"], "estado": r["estado"], "km_restante": r["km_restante"],
-            "categoria": r.get("categoria", "Otros"), "clase": r.get("clase", "reemplazo"),
+            "categoria": r.get("categoria", "Otros"), "clase": "reemplazo",
             "precio_promedio": prom, "conteo": p["conteo"] if p else 0,
             "mercado_min": t.get("mercado_min"), "mercado_max": t.get("mercado_max"),
             "mercado_nota": t.get("mercado_nota"),
@@ -111,6 +119,7 @@ def _resumen_vehiculo(usuario: dict) -> dict:
             "llantas": f"{variante['medida_llanta']} · {variante['presion_llantas']}",
         },
         "proximos": proximos,
+        "recomendaciones": recomendaciones,
         "total_vencidos_estimado": round(total_vencidos, 2),
         "ultimos": hist[:5],
         "historial": hist,

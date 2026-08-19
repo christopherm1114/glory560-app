@@ -105,6 +105,7 @@ def calcular_estado_vehiculo(vehiculo: dict) -> list[dict]:
             "km_restante": km_restante,
             "dias_restantes": dias_restantes,
             "intervalo_km": intervalo_km,
+            "intervalo_meses": intervalo_meses,
         })
 
     # Ordenamos: primero lo más urgente (menos km restantes).
