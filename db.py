@@ -83,13 +83,18 @@ def listar_usuarios_aprobados() -> list[dict]:
 
 def buscar_usuario_por_telefono_normalizado(telefono_digitos: str) -> dict | None:
     """
-    Busca por teléfono comparando solo los dígitos (ignora '+', espacios, etc.).
-    Como la base es pequeña, traemos los usuarios y comparamos en Python.
+    Busca por teléfono comparando solo los dígitos. Es tolerante al código de
+    país: '0999123456', '+593 999123456' y '593999123456' se consideran el mismo
+    número (comparando los últimos 9 dígitos). Así el prefijo +593 no rompe nada.
     """
-    resp = supabase.table("usuarios").select("*").execute()
-    for u in resp.data or []:
+    if not telefono_digitos:
+        return None
+    obj9 = telefono_digitos[-9:]
+    for u in supabase.table("usuarios").select("*").execute().data or []:
         guardado = "".join(c for c in str(u.get("telefono") or "") if c.isdigit())
-        if guardado == telefono_digitos and telefono_digitos:
+        if not guardado:
+            continue
+        if guardado == telefono_digitos or (len(guardado) >= 9 and guardado[-9:] == obj9):
             return u
     return None
 

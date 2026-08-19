@@ -67,7 +67,10 @@ def verificar_credencial(persona: dict, contrasena: str) -> bool:
     ch = persona.get("clave_hash")
     if ch:
         return verificar_password(contrasena, ch)
-    return normalizar_telefono(persona.get("clave") or persona.get("telefono")) == normalizar_telefono(contrasena)
+    # Heredado: la clave es el teléfono. Tolerante al código de país (últimos 9 dígitos).
+    a = normalizar_telefono(persona.get("clave") or persona.get("telefono"))
+    b = normalizar_telefono(contrasena)
+    return a == b or (len(a) >= 9 and len(b) >= 9 and a[-9:] == b[-9:])
 
 
 # ---------- Login ----------
