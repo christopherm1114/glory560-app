@@ -1,0 +1,9 @@
+# Dependencias solo para desarrollo y pruebas.
+# Render NO instala este archivo: usa requirements.txt, que queda mínimo a
+# propósito para no gastar el tiempo de build del plan gratuito.
+#
+#   pip install -r requirements-dev.txt
+#   pytest
+
+-r requirements.txt
+pytest==8.3.3

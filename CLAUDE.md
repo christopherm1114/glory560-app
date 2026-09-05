@@ -44,7 +44,10 @@ que haya una razón fuerte para cambiarla.
   llamar a `supabase.table(...)` directamente. Hay un par de violaciones heredadas en
   `tareas.py` y `handlers.py` — al tocarlas, moverlas a `db.py`.
 - `mantenimiento.py` no conoce Telegram ni HTTP. Es dominio puro. No introducir
-  dependencias hacia arriba.
+  dependencias hacia arriba. El cálculo vive en `calcular_estado()`, que **no consulta
+  la base de datos**: recibe los datos ya leídos y la fecha como argumentos, por eso se
+  puede probar. `calcular_estado_vehiculo()` es el envoltorio delgado que lee de `db` y
+  delega. Al ampliar el motor, la lógica va en la función pura y su prueba.
 - Las funciones de `handlers.py` son **síncronas**; `main.py` las ejecuta con
   `run_in_threadpool` para no bloquear el bucle asíncrono. No convertirlas a `async`
   sin cambiar también el punto de llamada.
@@ -96,10 +99,10 @@ frente a una app genérica de mantenimiento; conservarla al hacer cambios.
    los usuarios en cada carga del panel. `tareas.py` consulta `usuarios` dentro del bucle.
    Solución: columna `telefono_normalizado` indexada, y agregaciones en Postgres.
 
-6. **Un vehículo sin historial aparece con todo vencido.** En
-   `mantenimiento.calcular_estado_vehiculo`, si no hay servicios registrados de un tipo,
-   `km_base = 0`. Un vehículo que se registra con 45.000 km ve todos los controles en rojo
-   desde el primer día. Debe usarse como línea base el kilometraje al momento del registro.
+6. ~~**Un vehículo sin historial aparece con todo vencido.**~~ — *resuelto*. La línea base
+   es ahora `vehiculos.kilometraje_inicial`, congelado en el alta (migración `002`). No
+   sirve usar `kilometraje_actual`: al subir con el odómetro, el objetivo se aleja y el
+   control no vencería nunca. Cubierto por `test_mantenimiento.py`.
 
 7. **La tabla `alertas` está definida pero nadie la usa.** `db.crear_alerta` y
    `db.alerta_reciente_existe` —esta última con lógica anti-spam de 7 días— no se llaman
@@ -132,6 +135,16 @@ py -3.12 -m venv .venv
 pip install -r requirements.txt
 uvicorn main:app --reload --port 8000
 ```
+
+Para las pruebas:
+
+```powershell
+pip install -r requirements-dev.txt
+pytest
+```
+
+No necesitan credenciales ni base de datos: `conftest.py` aísla el import de `db`, y el
+motor de cálculo recibe los datos como argumentos.
 
 El panel queda en `http://localhost:8000/panel`. El webhook del bot **no** funciona en
 local: Telegram necesita una URL pública. Para probar el bot hace falta un túnel

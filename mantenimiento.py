@@ -32,28 +32,53 @@ def _a_fecha(texto: str | None) -> date | None:
             return None
 
 
-def calcular_estado_vehiculo(vehiculo: dict) -> list[dict]:
+def km_base_vehiculo(vehiculo: dict) -> int:
     """
-    Devuelve una lista con el estado de cada control del vehículo.
-    Cada elemento tiene: nombre, categoria, estado, km_restante, texto.
+    Kilometraje desde el que se mide un control que NUNCA se ha registrado.
+
+    Es el kilometraje con el que el vehículo entró al sistema, no el actual: si
+    fuera el actual, el objetivo se alejaría a la par que el odómetro y el
+    control no vencería jamás. Los vehículos creados antes de la migración 002
+    no tienen la columna, y para ellos se usa el kilometraje actual como
+    aproximación — es transitorio, la migración rellena el valor real.
     """
-    variante_id = vehiculo["variante_id"]
+    inicial = vehiculo.get("kilometraje_inicial")
+    if inicial is None:
+        return vehiculo.get("kilometraje_actual") or 0
+    return inicial
+
+
+def calcular_estado(
+    vehiculo: dict,
+    tipos_mantenimiento: list[dict],
+    historial: list[dict],
+    intervalos: list[dict],
+    hoy: date | None = None,
+) -> list[dict]:
+    """
+    Cálculo puro: recibe los datos ya leídos y no consulta la base de datos.
+
+    Está separado de `calcular_estado_vehiculo` para poder probarlo con datos
+    inventados. `hoy` se recibe como argumento por el mismo motivo: si leyera
+    date.today() por dentro, el resultado de una prueba cambiaría con el día.
+    """
     km_actual = vehiculo.get("kilometraje_actual") or 0
+    km_inicial = km_base_vehiculo(vehiculo)
+    hoy = hoy or date.today()
 
     # Diccionario id_tipo -> tipo (para nombre, categoría, clase).
-    tipos = {t["id"]: t for t in db.listar_tipos_mantenimiento()}
+    tipos = {t["id"]: t for t in tipos_mantenimiento}
 
-    # Traemos TODOS los mantenimientos del vehículo de una sola vez (en lugar de
-    # una consulta por cada control) y guardamos el ÚLTIMO de cada tipo por km.
+    # Del historial completo guardamos el ÚLTIMO servicio de cada tipo, por km.
     ultimos: dict = {}
-    for m in db.historial(vehiculo["id"], 500):
+    for m in historial:
         tid = m["tipo_mantenimiento_id"]
         prev = ultimos.get(tid)
         if prev is None or (m.get("kilometraje") or 0) > (prev.get("kilometraje") or 0):
             ultimos[tid] = m
 
     resultados = []
-    for intervalo in db.intervalos_de_variante(variante_id):
+    for intervalo in intervalos:
         tipo_id = intervalo["tipo_mantenimiento_id"]
         tipo = tipos.get(tipo_id, {})
         nombre = tipo.get("nombre", f"Control {tipo_id}")
@@ -69,8 +94,10 @@ def calcular_estado_vehiculo(vehiculo: dict) -> list[dict]:
             km_base = ultimo.get("kilometraje") or 0
             fecha_base = _a_fecha(ultimo.get("fecha"))
         else:
-            # Nunca registrado: partimos del estado actual del vehículo.
-            km_base = 0
+            # Nunca registrado: partimos del estado con el que entró el vehículo.
+            # Antes esto era 0, y un vehículo dado de alta con 45.000 km veía
+            # todos sus controles en rojo desde el primer día.
+            km_base = km_inicial
             fecha_base = _a_fecha(vehiculo.get("fecha_ultimo_aceite")) \
                 or _a_fecha(vehiculo.get("fecha_actualizacion_km"))
 
@@ -85,7 +112,7 @@ def calcular_estado_vehiculo(vehiculo: dict) -> list[dict]:
         if intervalo_meses and fecha_base:
             # Aproximamos meses como bloques de 30 días (suficiente para avisar).
             proximo_dia = fecha_base.toordinal() + intervalo_meses * 30
-            dias_restantes = proximo_dia - date.today().toordinal()
+            dias_restantes = proximo_dia - hoy.toordinal()
 
         # --- Clasificación (lo que venza primero manda) ---
         estado = "al_dia"
@@ -113,6 +140,22 @@ def calcular_estado_vehiculo(vehiculo: dict) -> list[dict]:
         return r["km_restante"] if r["km_restante"] is not None else 9_999_999
     resultados.sort(key=clave_orden)
     return resultados
+
+
+def calcular_estado_vehiculo(vehiculo: dict) -> list[dict]:
+    """
+    Devuelve una lista con el estado de cada control del vehículo.
+    Cada elemento tiene: nombre, categoria, estado, km_restante, texto.
+
+    Lee los datos y delega el cálculo en `calcular_estado`. Es el único punto de
+    este módulo que toca la base de datos, para que el cálculo siga siendo puro.
+    """
+    return calcular_estado(
+        vehiculo,
+        db.listar_tipos_mantenimiento(),
+        db.historial(vehiculo["id"], 500),
+        db.intervalos_de_variante(vehiculo["variante_id"]),
+    )
 
 
 def emoji_estado(estado: str) -> str:

@@ -132,6 +132,8 @@ def crear_vehiculo(usuario_id: int, variante_id: int, placa: str, anio: int | No
         "placa": placa,
         "anio_modelo": anio,
         "kilometraje_actual": kilometraje,
+        # Congelado: es la línea base de los controles que aún no se registran.
+        "kilometraje_inicial": kilometraje,
         "fecha_actualizacion_km": _hoy(),
         "fecha_ultimo_aceite": fecha_ultimo_aceite,
     }).execute()

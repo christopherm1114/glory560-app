@@ -80,6 +80,9 @@ CREATE TABLE vehiculos (
     placa                  VARCHAR(12) NOT NULL,
     anio_modelo            SMALLINT,
     kilometraje_actual     INT  DEFAULT 0,
+    -- Kilometraje con el que el vehículo entró al sistema. No se actualiza:
+    -- es la línea base de los controles que nunca se han registrado.
+    kilometraje_inicial    INT,
     fecha_actualizacion_km DATE,
     fecha_ultimo_aceite    DATE
 );
