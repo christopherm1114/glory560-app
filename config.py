@@ -28,8 +28,16 @@ def _requerida(nombre: str) -> str:
 
 # --- Telegram ---
 TELEGRAM_BOT_TOKEN = _requerida("TELEGRAM_BOT_TOKEN")
-# El secreto del webhook es opcional pero MUY recomendado.
-TELEGRAM_WEBHOOK_SECRET = os.environ.get("TELEGRAM_WEBHOOK_SECRET", "")
+# Obligatoria: cuando estaba vacía, la comprobación del webhook se saltaba
+# entera y cualquiera podía enviar mensajes falsos haciéndose pasar por el admin.
+TELEGRAM_WEBHOOK_SECRET = _requerida("TELEGRAM_WEBHOOK_SECRET")
+
+# --- Secretos propios de la aplicación ---
+# Un secreto por cada frontera de confianza. Antes la cookie se firmaba con
+# TELEGRAM_BOT_TOKEN, que además viaja en cada URL de la API de Telegram: si se
+# filtraba, se podían fabricar sesiones de cualquier usuario, admin incluido.
+SESSION_SECRET = _requerida("SESSION_SECRET")
+TASKS_TOKEN = _requerida("TASKS_TOKEN")
 
 # --- Supabase ---
 SUPABASE_URL = _requerida("SUPABASE_URL")

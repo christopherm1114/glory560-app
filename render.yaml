@@ -11,6 +11,10 @@ services:
         sync: false
       - key: TELEGRAM_WEBHOOK_SECRET
         sync: false
+      - key: SESSION_SECRET
+        sync: false
+      - key: TASKS_TOKEN
+        sync: false
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_SERVICE_KEY

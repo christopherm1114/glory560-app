@@ -1,0 +1,1 @@
+{"nodes": [{"id": "$graphify-root$_migrations_001_alinear_esquema_sql", "label": "001_alinear_esquema.sql", "file_type": "code", "source_file": "migrations/001_alinear_esquema.sql", "source_location": null}], "edges": []}

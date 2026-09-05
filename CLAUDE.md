@@ -73,17 +73,22 @@ frente a una app genérica de mantenimiento; conservarla al hacer cambios.
    *Efecto silencioso:* como `tipos_mantenimiento.clase` no existe, la pestaña
    **Recomendaciones del panel siempre sale vacía** y el "tip del día" nunca se envía.
 
-2. **La cookie de sesión se firma con `TELEGRAM_BOT_TOKEN`** (`auth.crear_cookie_sesion`).
-   Si ese token se filtra, se pueden fabricar sesiones válidas de cualquier usuario,
-   admin incluido. Necesita un `SESSION_SECRET` propio.
+2. ~~**La cookie de sesión se firma con `TELEGRAM_BOT_TOKEN`**~~ — *resuelto*. Ahora se
+   firma con `SESSION_SECRET`, propio de la aplicación. Las dos mitades del mecanismo
+   (`auth.crear_cookie_sesion` y `auth.leer_cookie_sesion`) solo están unidas por esa
+   constante de módulo: al cambiarla hay que tocar **ambas** o nadie puede iniciar sesión.
 
 3. **La contraseña inicial es el número de teléfono, guardada en claro** en
    `usuarios.clave` (`db.crear_usuario`). `auth.verificar_credencial` acepta como válida
    la comparación de los últimos 9 dígitos del teléfono. Hay que forzar el cambio de
    contraseña en el primer ingreso y luego eliminar la columna `clave`.
 
-4. **El token de la tarea viaja en la URL** y es el mismo `TELEGRAM_WEBHOOK_SECRET` del
-   webhook. Debería ser un `TASKS_TOKEN` propio enviado en una cabecera.
+4. ~~**El token de la tarea viaja en la URL**~~ — *resuelto*. Ahora es un `TASKS_TOKEN`
+   propio que viaja en la cabecera `X-Tasks-Token`. Al mismo tiempo se cerró un fallo
+   más grave que no estaba documentado: `TELEGRAM_WEBHOOK_SECRET` era opcional y las dos
+   comprobaciones tenían la forma `if SECRETO and valor != SECRETO`, así que con la
+   variable sin definir **el webhook y la tarea quedaban completamente abiertos**. Las
+   tres variables son ahora obligatorias y se comparan con `hmac.compare_digest`.
 
 5. **Consultas que descargan tablas completas.**
    `db.buscar_usuario_por_telefono_normalizado` trae toda la tabla `usuarios` y filtra en
@@ -108,7 +113,10 @@ frente a una app genérica de mantenimiento; conservarla al hacer cambios.
 - **Nunca** subir el `.env`. El `.gitignore` estuvo un tiempo subido con el nombre
   equivocado (`download`); si vuelve a aparecer así, renombrarlo de inmediato.
 - Variables de entorno requeridas: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`,
-  `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `ADMIN_TELEGRAM_ID`.
+  `SESSION_SECRET`, `TASKS_TOKEN`, `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`,
+  `ADMIN_TELEGRAM_ID`. Un secreto por frontera de confianza: no reutilizar uno para
+  dos usos. Todas salvo `ADMIN_TELEGRAM_ID` pasan por `config._requerida`, así que si
+  falta alguna la app no arranca — eso es deliberado, es preferible a fallar en abierto.
 - La clave de Supabase es `service_role`: **ignora RLS por completo**. Toda la
   autorización descansa en `web._usuario_actual` y `web._solo_admin`. Al agregar
   cualquier ruta nueva a `web.py`, la primera línea debe ser una de esas dos

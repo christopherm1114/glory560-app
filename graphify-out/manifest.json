@@ -1,0 +1,104 @@
+{
+  "auth.py": {
+    "mtime": 1788476260.354095,
+    "seen": 1788630065.3322313,
+    "ast_hash": "496384282c4d3d49583dcd1592c0cb16",
+    "semantic_hash": "496384282c4d3d49583dcd1592c0cb16"
+  },
+  "config.py": {
+    "mtime": 1788476260.354095,
+    "seen": 1788630065.3322313,
+    "ast_hash": "503779bb1cbe3c4b2fd61f483aaf5bdc",
+    "semantic_hash": "503779bb1cbe3c4b2fd61f483aaf5bdc"
+  },
+  "db.py": {
+    "mtime": 1788476260.354095,
+    "seen": 1788630065.3322313,
+    "ast_hash": "21e38d1269dc5dc6a1526974f94d3991",
+    "semantic_hash": "21e38d1269dc5dc6a1526974f94d3991"
+  },
+  "handlers.py": {
+    "mtime": 1788476260.354095,
+    "seen": 1788630065.3322313,
+    "ast_hash": "2ac8f845d8ebf39ca285148cab50bd8f",
+    "semantic_hash": "2ac8f845d8ebf39ca285148cab50bd8f"
+  },
+  "main.py": {
+    "mtime": 1788476260.354095,
+    "seen": 1788630065.3322313,
+    "ast_hash": "232cf0b35325e13271784c8990948524",
+    "semantic_hash": "232cf0b35325e13271784c8990948524"
+  },
+  "mantenimiento.py": {
+    "mtime": 1788476260.354095,
+    "seen": 1788630065.3322313,
+    "ast_hash": "3b059368ab59a4bcacc68bfe7955bcb9",
+    "semantic_hash": "3b059368ab59a4bcacc68bfe7955bcb9"
+  },
+  "migrations/001_alinear_esquema.sql": {
+    "mtime": 1788477532.195257,
+    "seen": 1788630065.3322313,
+    "ast_hash": "3df258dc8639a8674b548261646c5184",
+    "semantic_hash": "3df258dc8639a8674b548261646c5184"
+  },
+  "schema.sql": {
+    "mtime": 1788477545.1223092,
+    "seen": 1788630065.3322313,
+    "ast_hash": "77e1a3aa3a6cf87a967c0c12cb3128c4",
+    "semantic_hash": "77e1a3aa3a6cf87a967c0c12cb3128c4"
+  },
+  "seed.sql": {
+    "mtime": 1788476260.3666334,
+    "seen": 1788630065.3322313,
+    "ast_hash": "a1173a1b6c8227cf27ad390fae5b26e2",
+    "semantic_hash": "a1173a1b6c8227cf27ad390fae5b26e2"
+  },
+  "tareas.py": {
+    "mtime": 1788476260.3666334,
+    "seen": 1788630065.3322313,
+    "ast_hash": "50bb1f803b594e2572d4b09b9270c8e2",
+    "semantic_hash": "50bb1f803b594e2572d4b09b9270c8e2"
+  },
+  "telegram.py": {
+    "mtime": 1788476260.3666334,
+    "seen": 1788630065.3322313,
+    "ast_hash": "c3574975db84eb452a32f217c6e8698b",
+    "semantic_hash": "c3574975db84eb452a32f217c6e8698b"
+  },
+  "web.py": {
+    "mtime": 1788476260.3666334,
+    "seen": 1788630065.3322313,
+    "ast_hash": "dfc97fa1e43d55c03f1a0d13290e1b7e",
+    "semantic_hash": "dfc97fa1e43d55c03f1a0d13290e1b7e"
+  },
+  "CLAUDE.md": {
+    "mtime": 1788476683.7734513,
+    "seen": 1788630065.3322313,
+    "ast_hash": "53e8be47f5f0af4c824ed04ae1c76f74",
+    "semantic_hash": "53e8be47f5f0af4c824ed04ae1c76f74"
+  },
+  "LEEME.md": {
+    "mtime": 1788476260.354095,
+    "seen": 1788630065.3322313,
+    "ast_hash": "4bb4359135fc8d5dcf1689c9134dfa51",
+    "semantic_hash": "4bb4359135fc8d5dcf1689c9134dfa51"
+  },
+  "panel.html": {
+    "mtime": 1788476260.3666334,
+    "seen": 1788630065.3322313,
+    "ast_hash": "6b58dc4d5f44b297f9515d7378d62bf9",
+    "semantic_hash": "6b58dc4d5f44b297f9515d7378d62bf9"
+  },
+  "render.yaml": {
+    "mtime": 1788476260.3666334,
+    "seen": 1788630065.3322313,
+    "ast_hash": "a89c1fcf08540f10618a3c050c15a697",
+    "semantic_hash": "a89c1fcf08540f10618a3c050c15a697"
+  },
+  "requirements.txt": {
+    "mtime": 1788476260.3666334,
+    "seen": 1788630065.3322313,
+    "ast_hash": "067e5a3a18637d87eca15d3658bdfa87",
+    "semantic_hash": "067e5a3a18637d87eca15d3658bdfa87"
+  }
+}

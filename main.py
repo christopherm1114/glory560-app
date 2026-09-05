@@ -11,11 +11,13 @@ Aquí se definen las "rutas" (URLs) que expone el servidor:
 Render ejecuta esta app con:  uvicorn api.main:app --host 0.0.0.0 --port $PORT
 """
 
+import hmac
+
 from fastapi import FastAPI, Request, Header, HTTPException
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import PlainTextResponse
 
-from config import TELEGRAM_WEBHOOK_SECRET
+from config import TELEGRAM_WEBHOOK_SECRET, TASKS_TOKEN
 import handlers, tareas
 import web
 
@@ -40,7 +42,7 @@ async def webhook_telegram(
     Telegram llama a esta ruta cada vez que llega un mensaje al bot.
     Primero verificamos el secreto (para asegurar que viene de Telegram).
     """
-    if TELEGRAM_WEBHOOK_SECRET and x_telegram_bot_api_secret_token != TELEGRAM_WEBHOOK_SECRET:
+    if not hmac.compare_digest(x_telegram_bot_api_secret_token.encode(), TELEGRAM_WEBHOOK_SECRET.encode()):
         raise HTTPException(status_code=403, detail="Secreto inválido")
 
     update = await request.json()
@@ -54,15 +56,16 @@ async def webhook_telegram(
 
 
 # Acepta GET y POST para que cualquier programador externo (ej. cron-job.org)
-# pueda llamarlo fácilmente. Se protege con un 'token' en la dirección, que
-# debe coincidir con TELEGRAM_WEBHOOK_SECRET (así nadie más puede dispararlo).
+# pueda llamarlo fácilmente. El token viaja en la cabecera X-Tasks-Token y no en
+# la dirección: las URLs quedan escritas en los registros del servidor y en el
+# historial del navegador, así que un token en la URL se filtra solo.
 @app.get("/tasks/revisar-vencimientos", response_class=PlainTextResponse)
 @app.post("/tasks/revisar-vencimientos", response_class=PlainTextResponse)
-async def revisar_vencimientos(token: str = ""):
+async def revisar_vencimientos(x_tasks_token: str = Header(default="")):
     # SIEMPRE devolvemos una respuesta minúscula en texto plano.
     # cron-job.org (plan gratis) corta las respuestas grandes; por eso
     # nunca devolvemos JSON largo ni una página de error, pase lo que pase.
-    if TELEGRAM_WEBHOOK_SECRET and token != TELEGRAM_WEBHOOK_SECRET:
+    if not hmac.compare_digest(x_tasks_token.encode(), TASKS_TOKEN.encode()):
         return PlainTextResponse("token invalido", status_code=403)
     try:
         total = await run_in_threadpool(tareas.revisar_vencimientos)
