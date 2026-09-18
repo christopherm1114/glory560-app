@@ -43,6 +43,16 @@ def calcular_estado_vehiculo(vehiculo: dict) -> list[dict]:
     # Diccionario id_tipo -> tipo (para nombre, categoría, clase).
     tipos = {t["id"]: t for t in db.listar_tipos_mantenimiento()}
 
+    # Línea base: el kilometraje con el que el vehículo entró al sistema.
+    # Los controles que nunca se han registrado se cuentan DESDE ahí, no desde
+    # cero. Un auto que se registra con 45.000 km y un intervalo de 5.000 km
+    # tiene su primer aviso a los 50.000, no todo en rojo el primer día.
+    # Si el vehículo es viejo y no tiene lecturas guardadas, arrancamos desde
+    # su kilometraje actual: se corrige solo en cuanto registre un /km.
+    km_inicial = db.km_base_vehiculo(vehiculo["id"])
+    if km_inicial is None:
+        km_inicial = km_actual
+
     # Traemos TODOS los mantenimientos del vehículo de una sola vez (en lugar de
     # una consulta por cada control) y guardamos el ÚLTIMO de cada tipo por km.
     ultimos: dict = {}
@@ -69,8 +79,8 @@ def calcular_estado_vehiculo(vehiculo: dict) -> list[dict]:
             km_base = ultimo.get("kilometraje") or 0
             fecha_base = _a_fecha(ultimo.get("fecha"))
         else:
-            # Nunca registrado: partimos del estado actual del vehículo.
-            km_base = 0
+            # Nunca registrado: partimos de la línea base del vehículo.
+            km_base = km_inicial
             fecha_base = _a_fecha(vehiculo.get("fecha_ultimo_aceite")) \
                 or _a_fecha(vehiculo.get("fecha_actualizacion_km"))
 

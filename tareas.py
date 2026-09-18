@@ -18,10 +18,37 @@ Se puede ejecutar a mano con:  python tareas.py
 """
 
 import random
+import threading
+import traceback
 
 import db
 import telegram as tg
 import mantenimiento
+
+
+# Evita que dos ejecuciones del cron se pisen. Si el servicio venía dormido,
+# cron-job.org puede reintentar mientras la primera corrida sigue enviando
+# mensajes; sin este candado el usuario recibiría el recordatorio por duplicado.
+_candado = threading.Lock()
+
+
+def ejecutar_revision() -> None:
+    """
+    Envoltorio que usa la ruta HTTP: corre la revisión en segundo plano,
+    ignora la llamada si ya hay una en curso y nunca deja escapar un error
+    (la ruta ya respondió; una excepción aquí solo ensuciaría el log).
+    """
+    if not _candado.acquire(blocking=False):
+        print("[tareas] ya hay una revisión en curso; se ignora esta llamada")
+        return
+    try:
+        total = revisar_vencimientos()
+        print(f"[tareas] recordatorios enviados: {total}")
+    except Exception as e:
+        print(f"[tareas] error al revisar vencimientos: {e}")
+        traceback.print_exc()
+    finally:
+        _candado.release()
 
 
 def revisar_vencimientos() -> int:
@@ -29,13 +56,15 @@ def revisar_vencimientos() -> int:
     hoy = db._hoy()
     enviados = 0
 
+    # Los dueños se traen de UNA vez y se indexan por id. Antes se consultaba
+    # la tabla 'usuarios' dentro del bucle: con N vehículos eran N consultas
+    # extra, y eso era parte de por qué la tarea excedía el tiempo del cron.
+    aprobados = {u["id"]: u for u in db.listar_usuarios_aprobados()}
+
     for vehiculo in db.listar_todos_los_vehiculos():
         # 1) El dueño debe existir y estar aprobado.
-        resp = db.supabase.table("usuarios").select("*").eq("id", vehiculo["usuario_id"]).execute()
-        if not resp.data:
-            continue
-        usuario = resp.data[0]
-        if usuario.get("estado") != "aprobado":
+        usuario = aprobados.get(vehiculo["usuario_id"])
+        if not usuario:
             continue
 
         # 2) ¿Ya registró el kilometraje HOY? Si sí, no insistimos.

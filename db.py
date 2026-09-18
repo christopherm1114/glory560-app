@@ -8,12 +8,55 @@ concreta con la base de datos (buscar un usuario, crear un vehículo, etc.),
 para que el resto del código quede limpio y fácil de leer.
 """
 
+import threading
+import time
 from datetime import datetime, timezone
 from supabase import create_client, Client
+from supabase.client import ClientOptions
 from config import SUPABASE_URL, SUPABASE_SERVICE_KEY
 
 # Creamos el cliente una sola vez y lo reutilizamos en todo el programa.
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+#
+# El timeout es importante: sin él, una consulta que no responde deja colgado
+# un hilo del grupo que usa FastAPI (son 40). Con el bot y el panel pidiendo a
+# la vez, unas pocas consultas colgadas congelaban la aplicacion entera.
+supabase: Client = create_client(
+    SUPABASE_URL,
+    SUPABASE_SERVICE_KEY,
+    options=ClientOptions(postgrest_client_timeout=15, storage_client_timeout=15),
+)
+
+
+# ==================== CACHÉ DE CATÁLOGOS ====================
+#
+# 'tipos_mantenimiento' e 'intervalos' son catálogos de solo lectura: ninguna
+# ruta de la app los modifica (solo se tocan a mano desde Supabase). Traerlos
+# en cada mensaje del bot costaba dos viajes de red por comando. Se guardan en
+# memoria con vencimiento corto: si los editas en Supabase, el cambio entra
+# solo, a más tardar en _VIDA_CACHE segundos.
+
+_VIDA_CACHE = 600  # segundos (10 minutos)
+_cache: dict[str, tuple[float, list[dict]]] = {}
+_cache_candado = threading.Lock()
+
+
+def _cacheado(clave: str, consulta) -> list[dict]:
+    """Devuelve el resultado de 'consulta', reusándolo mientras no venza."""
+    ahora = time.monotonic()
+    with _cache_candado:
+        guardado = _cache.get(clave)
+        if guardado and (ahora - guardado[0]) < _VIDA_CACHE:
+            return guardado[1]
+    datos = consulta() or []
+    with _cache_candado:
+        _cache[clave] = (ahora, datos)
+    return datos
+
+
+def limpiar_cache() -> None:
+    """Vacía la caché de catálogos (útil tras editar los datos en Supabase)."""
+    with _cache_candado:
+        _cache.clear()
 
 
 # ==================== USUARIOS ====================
@@ -135,7 +178,17 @@ def crear_vehiculo(usuario_id: int, variante_id: int, placa: str, anio: int | No
         "fecha_actualizacion_km": _hoy(),
         "fecha_ultimo_aceite": fecha_ultimo_aceite,
     }).execute()
-    return resp.data[0]
+    vehiculo = resp.data[0]
+
+    # Dejamos sentado el kilometraje con el que entra el vehículo. Es la línea
+    # base de los cálculos: sin ella, un auto que se registra con 45.000 km
+    # aparecía con todos los controles vencidos desde el primer día, porque
+    # el motor asumía que el último servicio fue a los 0 km.
+    try:
+        registrar_lectura_km(vehiculo["id"], kilometraje)
+    except Exception as e:
+        print(f"[db] no se pudo registrar la lectura inicial de km: {e}")
+    return vehiculo
 
 
 def buscar_vehiculo_de_usuario(usuario_id: int) -> dict | None:
@@ -157,8 +210,11 @@ def listar_todos_los_vehiculos() -> list[dict]:
 # ==================== MANTENIMIENTOS ====================
 
 def listar_tipos_mantenimiento() -> list[dict]:
-    resp = supabase.table("tipos_mantenimiento").select("*").order("id").execute()
-    return resp.data or []
+    """Catálogo de controles. Cacheado: es de solo lectura (ver _cacheado)."""
+    return _cacheado(
+        "tipos",
+        lambda: supabase.table("tipos_mantenimiento").select("*").order("id").execute().data,
+    )
 
 
 def obtener_tipo(tipo_id: int) -> dict | None:
@@ -167,9 +223,12 @@ def obtener_tipo(tipo_id: int) -> dict | None:
 
 
 def intervalos_de_variante(variante_id: int) -> list[dict]:
-    """Devuelve los intervalos configurados para una variante."""
-    resp = supabase.table("intervalos").select("*").eq("variante_id", variante_id).execute()
-    return resp.data or []
+    """Devuelve los intervalos configurados para una variante (cacheado)."""
+    return _cacheado(
+        f"intervalos:{variante_id}",
+        lambda: supabase.table("intervalos").select("*")
+        .eq("variante_id", variante_id).execute().data,
+    )
 
 
 def crear_mantenimiento(vehiculo_id: int, tipo_id: int, fecha: str, kilometraje: int,
@@ -257,6 +316,26 @@ def registrar_lectura_km(vehiculo_id: int, kilometraje: int, fecha: str | None =
         "kilometraje": kilometraje,
         "fecha": fecha or _hoy(),
     }).execute()
+
+
+def km_base_vehiculo(vehiculo_id: int) -> int | None:
+    """
+    Kilometraje con el que el vehículo entró al sistema (la lectura más baja
+    registrada). Sirve de punto de partida para los controles que todavía no
+    tienen ningún servicio en el historial.
+
+    Devuelve None si el vehículo es anterior a este cambio y no tiene ninguna
+    lectura guardada; quien llama decide qué usar en ese caso.
+    """
+    resp = (supabase.table("lecturas_km").select("kilometraje")
+            .eq("vehiculo_id", vehiculo_id)
+            .order("kilometraje").limit(1).execute())
+    if not resp.data:
+        return None
+    try:
+        return int(resp.data[0]["kilometraje"])
+    except (TypeError, ValueError, KeyError):
+        return None
 
 
 def historial_km(vehiculo_id: int, limite: int = 100) -> list[dict]:
