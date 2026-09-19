@@ -16,7 +16,7 @@ import secrets
 import time
 
 import db
-from config import TELEGRAM_BOT_TOKEN
+from config import SESSION_SECRET
 
 
 def normalizar_telefono(valor: str) -> str:
@@ -102,7 +102,7 @@ def crear_cookie_sesion(usuario_id: int, minutos: int = MINUTOS_SESION) -> str:
     """Crea un texto firmado 'usuario_id.expiracion.firma' (sesión corta y deslizante)."""
     expira = int(time.time()) + minutos * 60
     base = f"{usuario_id}.{expira}"
-    firma = hmac.new(TELEGRAM_BOT_TOKEN.encode(), base.encode(), hashlib.sha256).hexdigest()
+    firma = hmac.new(SESSION_SECRET.encode(), base.encode(), hashlib.sha256).hexdigest()
     return f"{base}.{firma}"
 
 
@@ -115,7 +115,7 @@ def leer_cookie_sesion(cookie: str | None) -> int | None:
     except (ValueError, AttributeError):
         return None
     base = f"{usuario_id}.{expira}"
-    calculado = hmac.new(TELEGRAM_BOT_TOKEN.encode(), base.encode(), hashlib.sha256).hexdigest()
+    calculado = hmac.new(SESSION_SECRET.encode(), base.encode(), hashlib.sha256).hexdigest()
     if not hmac.compare_digest(calculado, firma):
         return None
     try:

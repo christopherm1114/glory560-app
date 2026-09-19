@@ -60,6 +60,13 @@ que haya una razón fuerte para cambiarla.
 - Los catálogos (`tipos_mantenimiento`, `intervalos`) se sirven de una caché en memoria
   de 10 minutos (`db._cacheado`). Son de solo lectura: si alguna ruta llega a escribirlos,
   hay que llamar a `db.limpiar_cache()`.
+- **El odómetro nunca retrocede por `/km`.** La vía de corrección de un dato mal tecleado
+  es `/perfil` en el bot o el perfil del panel; ahí sí se permite bajarlo. Un servicio,
+  en cambio, sí puede registrarse a menos km que el odómetro (se hizo en el pasado), pero
+  nunca a más. Las dos reglas viven en `mantenimiento.py`, que es dominio puro.
+- **`panel.html` lee por nombre los campos que arma `web._resumen_vehiculo`**, sin tipos ni
+  esquema de por medio: renombrar uno rompe la pantalla en silencio. `pruebas.py` fija ese
+  contrato en `CAMPOS_SEMAFORO` y `CAMPOS_RECOMENDACION`; si cambias un campo, cámbialo ahí.
 
 ## Modelo de datos
 
@@ -74,21 +81,24 @@ frente a una app genérica de mantenimiento; conservarla al hacer cambios.
 
 ## Problemas conocidos (pendientes, en orden de prioridad)
 
-1. **La cookie de sesión se firma con `TELEGRAM_BOT_TOKEN`** (`auth.crear_cookie_sesion`).
-   Si ese token se filtra, se pueden fabricar sesiones válidas de cualquier usuario,
-   admin incluido. Necesita un `SESSION_SECRET` propio.
-
-2. **La contraseña inicial es el número de teléfono, guardada en claro** en
+1. **La contraseña inicial es el número de teléfono, guardada en claro** en
    `usuarios.clave` (`db.crear_usuario`). `auth.verificar_credencial` acepta como válida
    la comparación de los últimos 9 dígitos del teléfono. Hay que forzar el cambio de
    contraseña en el primer ingreso y luego eliminar la columna `clave`.
 
-3. **`supabase-py 2.7.4` solo acepta claves con formato JWT.** Valida la clave contra una
+2. **`supabase-py 2.7.4` solo acepta claves con formato JWT.** Valida la clave contra una
    expresión regular de tres segmentos separados por puntos (ver `supabase/_sync/client.py`).
    Las claves nuevas de Supabase (`sb_secret_...`) **no pasan** esa validación: el proceso
    muere al arrancar con `SupabaseException: Invalid API key`. Mientras la clave sea la JWT
    antigua (`eyJ...`) funciona, pero Supabase está retirando ese formato. Antes de rotar la
-   clave hay que subir `supabase-py`. Ojo: `LEEME.md` todavía manda usar la clave nueva.
+   clave hay que subir `supabase-py`.
+
+3. **Datos sucios heredados en producción.** El bug de `_a_entero` (ya corregido) dejó
+   lecturas diez veces mayores de lo tecleado: `3861.5` se guardó como `38615`. Los valores
+   afectados siguen ahí. El vehículo GPZ0327 arrastra además una primera lectura de 5.000 km
+   —de prueba— que es su línea base, y un servicio registrado a 105.000 km con el odómetro
+   en 47.300. Mientras no se limpien, ese vehículo muestra 27 controles vencidos aunque el
+   código sea correcto. Limpiarlo son escrituras sobre producción: preguntar antes.
 
 4. **Consultas que descargan tablas completas.**
    `db.buscar_usuario_por_telefono_normalizado` trae toda la tabla `usuarios` y filtra en
@@ -100,34 +110,24 @@ frente a una app genérica de mantenimiento; conservarla al hacer cambios.
    `db.alerta_reciente_existe` —esta última con lógica anti-spam de 7 días— no se llaman
    desde ningún lado. Decidir: cablearlas o sacarlas del esquema.
 
-6. **Nada valida el kilometraje que se teclea.** Las cinco rutas que escriben km
-   (`/km`, el registro, el perfil del bot, `/api/perfil`, el alta de mantenimientos)
-   aceptan cualquier número: menor que el odómetro actual, o con un dígito de más.
-   En la base real hay saltos de 232.000 a 46.000 y de 3.844 a 38.615. Eso ensucia
-   el gráfico, descuadra la línea base y deja servicios registrados a más km que el
-   propio odómetro. Falta una validación común en `db` (rechazar retrocesos y avisar
-   de saltos inverosímiles) con una vía clara para corregir un error de tipeo.
-
-7. Menores: `_a_entero` convierte `"45.5"` en `455`; los meses se aproximan como bloques
-   de 30 días (~5 días de desfase al año); la sesión expira a los 12 minutos de inactividad.
+6. Menores: los meses se aproximan como bloques de 30 días (~5 días de desfase al año);
+   la sesión expira a los 12 minutos de inactividad.
 
 ### Resueltos (no volver a introducirlos)
 
-- `schema.sql` volvió a estar al día, y `migrations/001_alinear_esquema.sql` pone al día
-  una base vieja. **Verificar que 001 se haya ejecutado en el Supabase real**: si no,
-  la pestaña Recomendaciones sale vacía y el "tip del día" nunca se envía.
+- `schema.sql` está al día, y `migrations/001_alinear_esquema.sql` pone al día una base
+  vieja. Verificado contra el Supabase real: la migración corrió.
 - El keep-alive vive en `/salud`, separado de la tarea de recordatorios.
 - El webhook responde 200 antes de procesar, así Telegram no reenvía updates duplicados.
-- La tarea usa `TASKS_TOKEN` propio (con respaldo al secreto del webhook) y acepta
-  la cabecera `X-Tasks-Token`.
-- Un vehículo sin historial parte de su kilometraje de registro, no de 0
-  (`db.km_base_vehiculo`), así que ya no aparece todo en rojo el primer día.
-  La línea base es la **primera lectura por fecha**, no la más baja: hay
-  odómetros mal tecleados en la base y el mínimo tomaba esa cifra errónea.
+- La tarea usa `TASKS_TOKEN` propio y acepta la cabecera `X-Tasks-Token`.
+- La cookie de sesión se firma con `SESSION_SECRET`, no con el token del bot.
+- Un vehículo sin historial parte de su kilometraje de registro (`db.km_base_vehiculo`),
+  tomando la **primera lectura por fecha**, no la más baja.
 - Las conversaciones del bot caducan a las 6 horas (`db.HORAS_VIDA_CONVERSACION`).
-  Antes, quien abandonaba un registro a medias quedaba atrapado en ese paso.
-- Los comandos del bot avisan si el usuario no tiene vehículo, en vez de fallar en
-  silencio; `procesar_update` registra la traza completa y le responde al usuario.
+- `_a_entero` entiende la notación local: el punto es separador de miles solo si lo siguen
+  tres dígitos. Antes convertía `3861.5` en `38615`.
+- El kilometraje se valida al entrar (`mantenimiento.validar_lectura_km` y
+  `validar_km_servicio`), en el bot y en el panel.
 
 ## Seguridad y despliegue
 
@@ -135,7 +135,8 @@ frente a una app genérica de mantenimiento; conservarla al hacer cambios.
   equivocado (`download`); si vuelve a aparecer así, renombrarlo de inmediato.
 - Variables de entorno requeridas: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`,
   `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `ADMIN_TELEGRAM_ID`. Opcional pero recomendada:
-  `TASKS_TOKEN` (si falta, la tarea cae al secreto del webhook y lo avisa en el log).
+  `TASKS_TOKEN` y `SESSION_SECRET` (si faltan, caen al secreto del webhook y al token del
+  bot respectivamente, y lo avisan en el log).
 - **Cron:** dos trabajos distintos. `GET /salud` cada 10 minutos (mantiene despierto el
   servicio de Render, que duerme a los 15 minutos sin tráfico) y
   `GET /tasks/revisar-vencimientos` con el token, una vez al día a las 08:00.

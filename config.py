@@ -44,6 +44,20 @@ if not TASKS_TOKEN:
         print("[config] AVISO: falta TASKS_TOKEN; se usa TELEGRAM_WEBHOOK_SECRET "
               "como respaldo. Define TASKS_TOKEN en Render.")
 
+# --- Sesiones del panel web ---
+# Con esto se firma la cookie de sesión. Antes se reutilizaba
+# TELEGRAM_BOT_TOKEN: si ese token se filtraba, cualquiera podía fabricar una
+# sesión válida de cualquier usuario, administrador incluido. Son dos secretos
+# con vidas distintas y no deben compartirse.
+# Si no se define, se cae al token del bot para no dejar la app sin arrancar,
+# pero se avisa en el log. Al definirlo, las sesiones abiertas se cierran una
+# vez y los usuarios vuelven a ingresar: es lo esperado.
+SESSION_SECRET = os.environ.get("SESSION_SECRET", "")
+if not SESSION_SECRET:
+    SESSION_SECRET = TELEGRAM_BOT_TOKEN
+    print("[config] AVISO: falta SESSION_SECRET; se firma la sesión con "
+          "TELEGRAM_BOT_TOKEN como respaldo. Define SESSION_SECRET en Render.")
+
 # --- Supabase ---
 SUPABASE_URL = _requerida("SUPABASE_URL")
 SUPABASE_SERVICE_KEY = _requerida("SUPABASE_SERVICE_KEY")
