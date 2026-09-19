@@ -28,5 +28,10 @@ Esta versión tiene **todos los archivos en un solo nivel** (sin carpetas), para
 | `TELEGRAM_BOT_TOKEN` | @BotFather (al crear el bot) |
 | `TELEGRAM_WEBHOOK_SECRET` | una palabra secreta que tú inventas |
 | `SUPABASE_URL` | Supabase → Data API (o botón Connect) |
-| `SUPABASE_SERVICE_KEY` | Supabase → API Keys → **Secret key** (`sb_secret_...`) |
+| `SUPABASE_SERVICE_KEY` | Supabase → API Keys → **`service_role` (legacy JWT, empieza con `eyJ...`)** |
+| `TASKS_TOKEN` | otra palabra secreta, distinta de la del webhook |
 | `ADMIN_TELEGRAM_ID` | @userinfobot (tu ID numérico) |
+
+> ⚠️ **La clave de Supabase tiene que ser la JWT antigua (`eyJ...`), no la nueva
+> `sb_secret_...`.** La versión de `supabase-py` que usa el proyecto valida que la clave
+> tenga formato JWT y rechaza las nuevas al arrancar, con `Invalid API key`.

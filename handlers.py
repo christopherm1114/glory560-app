@@ -12,6 +12,8 @@ recordamos en qué PASO va cada usuario (en la tabla estado_conversacion) y,
 según el paso, interpretamos su respuesta.
 """
 
+import traceback
+
 import db
 import telegram as tg
 import mantenimiento
@@ -22,6 +24,15 @@ from config import ADMIN_TELEGRAM_ID
 # PUNTO DE ENTRADA: recibe cada update y decide a dónde mandarlo.
 # =====================================================================
 
+def _chat_del_update(update: dict) -> int | None:
+    """Saca el chat al que habría que responder, venga de donde venga el update."""
+    mensaje = update.get("message") or {}
+    if mensaje.get("chat", {}).get("id"):
+        return mensaje["chat"]["id"]
+    callback = update.get("callback_query") or {}
+    return (callback.get("message") or {}).get("chat", {}).get("id")
+
+
 def procesar_update(update: dict) -> None:
     try:
         if "message" in update:
@@ -29,8 +40,19 @@ def procesar_update(update: dict) -> None:
         elif "callback_query" in update:
             _manejar_callback(update["callback_query"])
     except Exception as e:
-        # Nunca dejamos que un error tumbe el webhook; lo registramos en el log.
+        # Nunca dejamos que un error tumbe el webhook, pero tampoco lo callamos:
+        # antes el usuario se quedaba sin respuesta y sin saber por qué, y en el
+        # log solo aparecía el mensaje del error, sin la línea que lo provocó.
         print(f"[ERROR] procesando update: {e}")
+        traceback.print_exc()
+        chat_id = _chat_del_update(update)
+        if chat_id:
+            try:
+                tg.enviar_mensaje(chat_id,
+                    "😕 Algo falló al procesar tu mensaje. Vuelve a intentarlo; "
+                    "si sigue igual, escribe /ayuda o avísale al administrador.")
+            except Exception as e2:
+                print(f"[ERROR] tampoco se pudo avisar al usuario: {e2}")
 
 
 # =====================================================================
@@ -450,7 +472,9 @@ def _aplicar_cambio_variante(chat_id, telegram_id, usuario, motor, trans) -> Non
 def _comando_km(chat_id, telegram_id, usuario, args) -> None:
     if not _exigir_aprobado(chat_id, usuario):
         return
-    vehiculo = db.buscar_vehiculo_de_usuario(usuario["id"])
+    vehiculo = _exigir_vehiculo(chat_id, usuario)
+    if not vehiculo:
+        return
     if not args:
         tg.enviar_mensaje(chat_id, "Escríbelo así: <code>/km 46000</code>")
         return
@@ -467,8 +491,13 @@ def _comando_km(chat_id, telegram_id, usuario, args) -> None:
 def _comando_insumos(chat_id, usuario) -> None:
     if not _exigir_aprobado(chat_id, usuario):
         return
-    vehiculo = db.buscar_vehiculo_de_usuario(usuario["id"])
+    vehiculo = _exigir_vehiculo(chat_id, usuario)
+    if not vehiculo:
+        return
     v = db.obtener_variante(vehiculo["variante_id"])
+    if not v:
+        tg.enviar_mensaje(chat_id, "No pude leer la ficha de tu versión. Avísale al administrador.")
+        return
     tg.enviar_mensaje(chat_id,
         f"🛢️ <b>Insumos de tu {v['nombre']}</b>\n"
         f"• Aceite de motor: {v['aceite_motor']} — {v['capacidad_aceite_l']} L\n"
@@ -481,7 +510,9 @@ def _comando_insumos(chat_id, usuario) -> None:
 def _comando_proximo(chat_id, usuario) -> None:
     if not _exigir_aprobado(chat_id, usuario):
         return
-    vehiculo = db.buscar_vehiculo_de_usuario(usuario["id"])
+    vehiculo = _exigir_vehiculo(chat_id, usuario)
+    if not vehiculo:
+        return
     estados = mantenimiento.calcular_estado_vehiculo(vehiculo)
     lineas = [mantenimiento.texto_estado(r) for r in estados]
     encabezado = (f"📋 <b>Próximos mantenimientos</b>\n"
@@ -506,7 +537,9 @@ def _comando_registrar(chat_id, telegram_id, usuario) -> None:
 
 
 def _finalizar_registro_mantenimiento(chat_id, telegram_id, usuario, datos) -> None:
-    vehiculo = db.buscar_vehiculo_de_usuario(usuario["id"])
+    vehiculo = _exigir_vehiculo(chat_id, usuario)
+    if not vehiculo:
+        return
     db.crear_mantenimiento(
         vehiculo_id=vehiculo["id"],
         tipo_id=datos["tipo_id"],
@@ -530,7 +563,9 @@ def _finalizar_registro_mantenimiento(chat_id, telegram_id, usuario, datos) -> N
 def _comando_eliminar(chat_id, telegram_id, usuario) -> None:
     if not _exigir_aprobado(chat_id, usuario):
         return
-    vehiculo = db.buscar_vehiculo_de_usuario(usuario["id"])
+    vehiculo = _exigir_vehiculo(chat_id, usuario)
+    if not vehiculo:
+        return
     registros = db.historial(vehiculo["id"], 10)
     if not registros:
         tg.enviar_mensaje(chat_id, "No tienes mantenimientos registrados para eliminar.")
@@ -566,7 +601,9 @@ def _eliminar_mant_callback(chat_id, telegram_id, mant_id) -> None:
 def _comando_historial(chat_id, usuario) -> None:
     if not _exigir_aprobado(chat_id, usuario):
         return
-    vehiculo = db.buscar_vehiculo_de_usuario(usuario["id"])
+    vehiculo = _exigir_vehiculo(chat_id, usuario)
+    if not vehiculo:
+        return
     registros = db.historial(vehiculo["id"])
     if not registros:
         tg.enviar_mensaje(chat_id, "Aún no tienes mantenimientos registrados. Usa /registrar.")
@@ -638,6 +675,23 @@ def _exigir_aprobado(chat_id, usuario) -> bool:
         tg.enviar_mensaje(chat_id, "Tu cuenta aún no está aprobada. Espera la confirmación. 🙌")
         return False
     return True
+
+
+def _exigir_vehiculo(chat_id, usuario) -> dict | None:
+    """
+    Devuelve el vehículo del usuario; si no tiene, avisa y devuelve None.
+
+    Antes cada comando daba por hecho que el vehículo existía. Un usuario
+    aprobado que nunca terminó el registro hacía reventar el comando con un
+    TypeError, y como procesar_update se tragaba la excepción, el bot
+    simplemente no contestaba: parecía colgado.
+    """
+    vehiculo = db.buscar_vehiculo_de_usuario(usuario["id"])
+    if not vehiculo:
+        tg.enviar_mensaje(chat_id,
+            "Todavía no tienes un vehículo registrado. Escribe /start para completar el registro.")
+        return None
+    return vehiculo
 
 
 def _a_entero(texto: str):

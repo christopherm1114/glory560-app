@@ -64,7 +64,10 @@ def _resumen_vehiculo(usuario: dict) -> dict:
     vehiculo = db.buscar_vehiculo_de_usuario(usuario["id"])
     if not vehiculo:
         return {"vehiculo": None}
-    variante = db.obtener_variante(vehiculo["variante_id"])
+    # Si la variante no se encuentra (id huérfano tras editar el catálogo a
+    # mano), el panel debe seguir cargando: sin este respaldo, /api/mis-datos
+    # devolvía un 500 y el usuario veía la página en blanco.
+    variante = db.obtener_variante(vehiculo["variante_id"]) or {}
     tipos_full = {t["id"]: t for t in db.listar_tipos_mantenimiento()}
     tipos = {i: t["nombre"] for i, t in tipos_full.items()}
 
@@ -110,13 +113,16 @@ def _resumen_vehiculo(usuario: dict) -> dict:
             "id": vehiculo["id"], "variante_id": vehiculo["variante_id"],
         },
         "variante": {
-            "nombre": variante["nombre"], "motor": variante["motor"], "transmision": variante["transmision"],
-            "aceite": f"{variante['aceite_motor']} · {variante['capacidad_aceite_l']} L",
-            "bujia": variante["bujia_tipo"],
+            "nombre": variante.get("nombre", "-"),
+            "motor": variante.get("motor", "-"),
+            "transmision": variante.get("transmision", "-"),
+            "aceite": f"{variante.get('aceite_motor','-')} · {variante.get('capacidad_aceite_l','-')} L",
+            "bujia": variante.get("bujia_tipo", "-"),
             "frenos": f"{variante.get('refrigerante_l','')}",
-            "transmision_liquido": f"{variante['liquido_transmision']} · {variante['capacidad_transmision_l']} L",
-            "refrigerante": f"{variante['refrigerante_l']} L",
-            "llantas": f"{variante['medida_llanta']} · {variante['presion_llantas']}",
+            "transmision_liquido": (f"{variante.get('liquido_transmision','-')} · "
+                                    f"{variante.get('capacidad_transmision_l','-')} L"),
+            "refrigerante": f"{variante.get('refrigerante_l','-')} L",
+            "llantas": f"{variante.get('medida_llanta','-')} · {variante.get('presion_llantas','-')}",
         },
         "proximos": proximos,
         "recomendaciones": recomendaciones,

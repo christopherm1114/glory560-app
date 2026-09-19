@@ -15,12 +15,37 @@ from config import TELEGRAM_BOT_TOKEN
 # Todas las llamadas van a esta URL base, que incluye el token del bot.
 _API = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
 
+# Un solo cliente para todo el programa, en vez de abrir una conexión nueva
+# por mensaje. Cada conexión nueva paga el saludo TLS con Telegram (~300 ms);
+# reutilizándola, el segundo mensaje y los siguientes salen casi gratis.
+# httpx.Client es seguro entre hilos, que es como lo usa FastAPI aquí.
+_TIEMPOS = httpx.Timeout(connect=5.0, read=15.0, write=10.0, pool=5.0)
+_cliente = httpx.Client(timeout=_TIEMPOS,
+                        limits=httpx.Limits(max_keepalive_connections=5,
+                                            max_connections=10))
+
 
 def _llamar(metodo: str, datos: dict) -> dict:
-    """Hace una petición POST a la API de Telegram y devuelve la respuesta."""
-    respuesta = httpx.post(f"{_API}/{metodo}", json=datos, timeout=20)
-    respuesta.raise_for_status()  # si Telegram devuelve error, lo lanza como excepción
-    return respuesta.json()
+    """
+    Hace una petición POST a la API de Telegram y devuelve la respuesta.
+
+    Reintenta UNA vez ante un fallo de red. Las conexiones que el cliente
+    mantiene abiertas pueden haber caducado del otro lado mientras el
+    servicio dormía; el primer intento falla y el segundo, ya con conexión
+    nueva, funciona. Sin esto, el primer mensaje tras despertar se perdía.
+    """
+    ultimo_error: Exception | None = None
+    for intento in (1, 2):
+        try:
+            respuesta = _cliente.post(f"{_API}/{metodo}", json=datos)
+            respuesta.raise_for_status()  # si Telegram devuelve error, lo lanza
+            return respuesta.json()
+        except httpx.TransportError as e:
+            # Solo los errores de transporte (red, timeout) merecen reintento;
+            # un 400 de Telegram va a fallar igual la segunda vez.
+            ultimo_error = e
+            print(f"[telegram] fallo de red en {metodo} (intento {intento}): {e}")
+    raise ultimo_error  # type: ignore[misc]
 
 
 def enviar_mensaje(chat_id: int, texto: str, teclado: dict | None = None) -> dict:
