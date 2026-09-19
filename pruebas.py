@@ -251,12 +251,145 @@ def probar_conversaciones() -> None:
         revisar(db._conversacion_caducada(valor) is esperado, descripcion)
 
 
+# =====================================================================
+# 6. LECTURA DE NÚMEROS TECLEADOS POR EL USUARIO
+# =====================================================================
+
+def probar_numeros() -> None:
+    print("\n[6] Números tecleados por el usuario")
+    import handlers
+
+    # El punto es separador de miles cuando lo siguen TRES dígitos, y decimal
+    # en cualquier otro caso. La versión vieja borraba todos los puntos, así
+    # que '3861.5' se guardaba como 38615 — así se ensució la base real.
+    casos = [
+        ("45.000", 45000, "'45.000' son cuarenta y cinco mil"),
+        ("232.930", 232930, "'232.930' son doscientos treinta y dos mil"),
+        ("1.234.567", 1234567, "'1.234.567' se lee con dos separadores"),
+        ("3861.5", 3861, "'3861.5' son 3861 km y medio, NO 38.615"),
+        ("11540.5", 11540, "'11540.5' no se convierte en 115.405"),
+        ("10520.0", 10520, "'10520.0' no se convierte en 105.200"),
+        ("46.0", 46, "'46.0' son 46, no 460"),
+        ("45,5", 45, "la coma decimal también se trunca"),
+        ("1,234.56", 1234, "manda el último separador"),
+        ("47300", 47300, "un número limpio pasa igual"),
+        ("  47300  ", 47300, "los espacios sobrantes no estorban"),
+        ("abc", None, "un texto no numérico devuelve None"),
+        ("12a", None, "un número con letras pegadas devuelve None"),
+        ("", None, "el texto vacío devuelve None"),
+    ]
+    for entrada, esperado, descripcion in casos:
+        revisar(handlers._a_entero(entrada) == esperado, descripcion)
+
+
+# =====================================================================
+# 7. VALIDACIÓN DEL KILOMETRAJE
+# =====================================================================
+
+def probar_validacion_km() -> None:
+    print("\n[7] Validación del kilometraje")
+    ACTUAL = 47300
+
+    acepta = lambda km: mantenimiento.validar_lectura_km(km, ACTUAL)[0]
+    revisar(acepta(47400), "una lectura mayor al odómetro se acepta")
+    revisar(acepta(ACTUAL), "repetir el mismo valor se acepta")
+    revisar(not acepta(46000), "una lectura que hace retroceder el odómetro se rechaza")
+    revisar(not acepta(0), "el cero se rechaza")
+    revisar(not acepta(-5), "un negativo se rechaza")
+    revisar(not acepta(5_000_000), "un valor imposible se rechaza")
+    revisar(not acepta(None), "un no-número se rechaza")
+    revisar("perfil" in mantenimiento.validar_lectura_km(46000, ACTUAL)[1],
+            "el rechazo explica cómo corregir el dato")
+
+    acepta_serv = lambda km: mantenimiento.validar_km_servicio(km, ACTUAL)[0]
+    revisar(acepta_serv(40000), "un servicio anterior al odómetro se acepta")
+    revisar(acepta_serv(ACTUAL), "un servicio justo al día de hoy se acepta")
+    revisar(not acepta_serv(105000), "un servicio por encima del odómetro se rechaza")
+    revisar(not acepta_serv(0), "un servicio en cero se rechaza")
+
+
+# =====================================================================
+# 8. CONTRATO ENTRE EL MOTOR, LA API Y EL PANEL
+# =====================================================================
+
+# Campos que panel.html lee de cada fila que le entrega /api/mis-datos.
+# Salieron de recorrer el propio panel.html (`r.<campo>` en pintarSemaforo,
+# filaSemaforo y vistaRecom). Si alguien renombra uno en web.py sin tocar el
+# panel, la pantalla se rompe en silencio: no hay tipos ni esquema que avisen.
+CAMPOS_SEMAFORO = {"nombre", "estado", "km_restante", "categoria", "clase",
+                   "precio_promedio", "conteo", "mercado_min", "mercado_max", "mercado_nota"}
+CAMPOS_RECOMENDACION = {"nombre", "categoria", "intervalo_km", "intervalo_meses", "descripcion"}
+# Campos que web.py necesita de cada resultado del motor de cálculo.
+CAMPOS_MOTOR = {"tipo_id", "nombre", "categoria", "clase", "estado",
+                "km_restante", "dias_restantes", "intervalo_km", "intervalo_meses"}
+
+
+def probar_contrato_panel() -> None:
+    print("\n[8] Contrato entre el motor, la API y el panel")
+    import web
+
+    db.listar_tipos_mantenimiento = lambda: [
+        {"id": 1, "nombre": "Aceite de motor", "categoria": "Motor", "clase": "reemplazo",
+         "descripcion": "Cambio de aceite", "mercado_min": 20, "mercado_max": 40,
+         "mercado_nota": "referencial"},
+        {"id": 2, "nombre": "Revisión de frenos", "categoria": "Frenos", "clase": "inspeccion",
+         "descripcion": "Inspección visual", "mercado_min": None, "mercado_max": None,
+         "mercado_nota": None},
+    ]
+    db.intervalos_de_variante = lambda vid: [
+        {"tipo_mantenimiento_id": 1, "intervalo_km": 5000, "intervalo_meses": 6},
+        {"tipo_mantenimiento_id": 2, "intervalo_km": 10000, "intervalo_meses": None},
+    ]
+    db.historial = lambda vid, limite=15: []
+    db.km_base_vehiculo = lambda vid: 45000
+
+    filas = mantenimiento.calcular_estado_vehiculo(VEHICULO)
+    faltan_motor = CAMPOS_MOTOR - set(filas[0])
+    revisar(not faltan_motor,
+            f"el motor entrega los campos que web.py consume (faltan: {faltan_motor or 'ninguno'})")
+
+    db.buscar_vehiculo_de_usuario = lambda uid: dict(VEHICULO, placa="AAA-1", anio_modelo=2022)
+    db.obtener_variante = lambda vid: {
+        "nombre": "SFG18 CVT", "motor": "1.8", "transmision": "CVT", "aceite_motor": "5W-30",
+        "capacidad_aceite_l": 4.0, "bujia_tipo": "NGK", "liquido_transmision": "CVT-J1",
+        "capacidad_transmision_l": 6.0, "refrigerante_l": 5.0, "medida_llanta": "215/60R17",
+        "presion_llantas": "32 psi"}
+    db.promedios_por_tipo = lambda costo_max=5000.0: {1: {"promedio": 30.0, "conteo": 4}}
+    db.gastos_por_categoria = lambda vid: [{"categoria": "Motor", "total": 120.0}]
+    db.historial_km = lambda vid, limite=100: []
+
+    datos = web._resumen_vehiculo({"id": 1, "nombre": "Prueba"})
+
+    revisar(bool(datos.get("proximos")), "la API entrega filas del semáforo")
+    if datos.get("proximos"):
+        faltan = CAMPOS_SEMAFORO - set(datos["proximos"][0])
+        revisar(not faltan, f"el semáforo trae lo que el panel lee (faltan: {faltan or 'ninguno'})")
+
+    revisar(bool(datos.get("recomendaciones")),
+            "la API entrega recomendaciones (los controles de clase 'inspeccion')")
+    if datos.get("recomendaciones"):
+        faltan = CAMPOS_RECOMENDACION - set(datos["recomendaciones"][0])
+        revisar(not faltan,
+                f"las recomendaciones traen lo que el panel lee (faltan: {faltan or 'ninguno'})")
+
+    revisar(datos.get("variante", {}).get("nombre") == "SFG18 CVT",
+            "el bloque de la variante llega armado")
+
+    # Una variante ausente no debe tumbar el panel entero.
+    db.obtener_variante = lambda vid: None
+    revisar(web._resumen_vehiculo({"id": 1, "nombre": "Prueba"}).get("variante") is not None,
+            "si falta la variante, la API responde igual en vez de dar error 500")
+
+
 if __name__ == "__main__":
     probar_rutas()
     probar_calculo()
     probar_tarea()
     probar_infraestructura()
     probar_conversaciones()
+    probar_numeros()
+    probar_validacion_km()
+    probar_contrato_panel()
     print("\n" + "=" * 62)
     if _fallos:
         print(f"{len(_fallos)} PRUEBA(S) FALLARON:")

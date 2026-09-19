@@ -284,6 +284,10 @@ def api_perfil(request: Request, cambios: dict = Body(...)):
         actualizar["anio_modelo"] = int(cambios["anio"])
     if "kilometraje" in cambios and str(cambios["kilometraje"]).isdigit():
         km = int(cambios["kilometraje"])
+        # El perfil es la vía de CORRECCIÓN: aquí sí se puede bajar el odómetro
+        # para arreglar un dato mal tecleado. Solo se filtra lo imposible.
+        if km <= 0 or km > mantenimiento.KM_MAXIMO_RAZONABLE:
+            return JSONResponse({"error": "km_invalido"}, status_code=400)
         actualizar["kilometraje_actual"] = km
         actualizar["fecha_actualizacion_km"] = db._hoy()
         db.registrar_lectura_km(vehiculo["id"], km)
@@ -343,6 +347,12 @@ def api_mant_crear(request: Request, datos: dict = Body(...)):
         km = int(datos.get("km"))
     except (TypeError, ValueError):
         return JSONResponse({"error": "km_invalido"}, status_code=400)
+    # Misma regla que en el bot: un servicio registrado a más kilómetros que el
+    # odómetro se vuelve línea base del cálculo y deja ese control en verde
+    # para siempre. El panel no puede ser una puerta trasera a ese estado.
+    aceptado, motivo = mantenimiento.validar_km_servicio(km, vehiculo.get("kilometraje_actual"))
+    if not aceptado:
+        return JSONResponse({"error": "km_invalido", "detalle": motivo}, status_code=400)
     try:
         costo = float(datos.get("costo"))
     except (TypeError, ValueError):

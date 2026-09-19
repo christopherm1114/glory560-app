@@ -198,8 +198,14 @@ def _continuar_conversacion(chat_id, telegram_id, texto, estado, usuario) -> Non
 
     elif paso == "reg_km":
         km = _a_entero(texto)
-        if km is None or km < 0:
+        if km is None:
             tg.enviar_mensaje(chat_id, "Escribe el kilometraje como un número (ej. 45000).")
+            return
+        # Todavía no hay odómetro guardado: solo se comprueba que el valor sea
+        # sensato. Esta cifra será la línea base de todos los cálculos.
+        aceptado, motivo = mantenimiento.validar_lectura_km(km, 0)
+        if not aceptado:
+            tg.enviar_mensaje(chat_id, f"⚠️ {motivo}")
             return
         datos["kilometraje"] = km
         db.guardar_estado(telegram_id, "reg_fecha_aceite", datos)
@@ -223,6 +229,12 @@ def _continuar_conversacion(chat_id, telegram_id, texto, estado, usuario) -> Non
         km = _a_entero(texto)
         if km is None:
             tg.enviar_mensaje(chat_id, "Escribe el kilometraje como número (ej. 45000).")
+            return
+        vehiculo_actual = db.buscar_vehiculo_de_usuario(usuario["id"]) if usuario else None
+        aceptado, motivo = mantenimiento.validar_km_servicio(
+            km, (vehiculo_actual or {}).get("kilometraje_actual"))
+        if not aceptado:
+            tg.enviar_mensaje(chat_id, f"⚠️ {motivo}")
             return
         datos["km"] = km
         db.guardar_estado(telegram_id, "mant_costo", datos)
@@ -438,9 +450,17 @@ def _aplicar_edicion_perfil(chat_id, telegram_id, usuario, campo, texto) -> None
             return
         db.actualizar_vehiculo(vehiculo_id, {"anio_modelo": anio})
     elif campo == "km":
+        # Esta es la vía de CORRECCIÓN: a diferencia de /km, aquí sí se permite
+        # bajar el odómetro, porque es el único modo que tiene el usuario de
+        # arreglar un dato mal tecleado sin pedir ayuda. Se comprueba la
+        # cordura del valor, pero no se exige que sea creciente.
         km = _a_entero(texto)
         if km is None:
             tg.enviar_mensaje(chat_id, "Kilometraje inválido. Intenta de nuevo.")
+            return
+        if km <= 0 or km > mantenimiento.KM_MAXIMO_RAZONABLE:
+            tg.enviar_mensaje(chat_id,
+                "⚠️ Ese valor no parece un kilometraje real. Revisa si sobra un dígito.")
             return
         db.actualizar_vehiculo(vehiculo_id, {"kilometraje_actual": km,
                                              "fecha_actualizacion_km": db._hoy()})
@@ -481,6 +501,10 @@ def _comando_km(chat_id, telegram_id, usuario, args) -> None:
     km = _a_entero(args[0])
     if km is None:
         tg.enviar_mensaje(chat_id, "El kilometraje debe ser un número. Ej: <code>/km 46000</code>")
+        return
+    aceptado, motivo = mantenimiento.validar_lectura_km(km, vehiculo.get("kilometraje_actual"))
+    if not aceptado:
+        tg.enviar_mensaje(chat_id, f"⚠️ {motivo}")
         return
     db.actualizar_vehiculo(vehiculo["id"], {"kilometraje_actual": km,
                                             "fecha_actualizacion_km": db._hoy()})
@@ -695,11 +719,46 @@ def _exigir_vehiculo(chat_id, usuario) -> dict | None:
 
 
 def _a_entero(texto: str):
-    """Convierte texto a entero de forma segura; devuelve None si no se puede."""
-    try:
-        return int(str(texto).replace(".", "").replace(",", "").strip())
-    except (ValueError, TypeError):
+    """
+    Convierte texto a entero entendiendo cómo se escriben los números en Ecuador.
+
+    La versión anterior borraba todos los puntos y comas, así que '3861.5'
+    (tres mil ochocientos sesenta y uno y medio) se guardaba como 38615: un
+    odómetro diez veces mayor. No era una errata del usuario, era la app
+    corrompiendo el dato — en la base de producción hay varias lecturas así.
+
+    La regla: el ÚLTIMO separador manda. Si lo que va detrás son exactamente
+    tres dígitos, es separador de miles ('45.000' -> 45000); si son una, dos o
+    más de tres cifras, es decimal y se trunca ('3861.5' -> 3861).
+    """
+    if texto is None:
         return None
+    limpio = str(texto).strip().replace(" ", "")
+    if not limpio:
+        return None
+
+    negativo = limpio.startswith("-")
+    limpio = limpio.lstrip("+-")
+
+    # Solo dígitos y separadores; cualquier otra cosa no es un número.
+    if not limpio or any(c not in "0123456789.," for c in limpio):
+        return None
+
+    corte = max(limpio.rfind("."), limpio.rfind(","))
+    if corte == -1:
+        entero = limpio
+    else:
+        cabeza, cola = limpio[:corte], limpio[corte + 1:]
+        if len(cola) == 3 and cola.isdigit():
+            entero = cabeza + cola          # separador de miles: 45.000
+        else:
+            entero = cabeza                 # separador decimal: se trunca
+    entero = entero.replace(".", "").replace(",", "")
+
+    if not entero.isdigit():
+        return None
+    valor = int(entero)
+    return -valor if negativo else valor
 
 
 def _a_numero(texto: str):

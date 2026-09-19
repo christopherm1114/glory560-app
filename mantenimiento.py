@@ -19,6 +19,64 @@ KM_AVISO = 500       # avisar cuando falten 500 km o menos
 DIAS_AVISO = 15      # o cuando falten 15 días o menos
 
 
+# Tope de cordura: ningún odómetro de un Glory 560 va a marcar esto.
+# Sirve para atajar un dígito de más antes de que ensucie el historial.
+KM_MAXIMO_RAZONABLE = 2_000_000
+
+
+def validar_lectura_km(km_nuevo, km_actual) -> tuple[bool, str]:
+    """
+    Valida una LECTURA del odómetro (el número que el usuario reporta hoy).
+
+    Devuelve (aceptada, motivo). El motivo va dirigido al usuario, en texto
+    plano: el dominio no sabe si lo leerá Telegram o el panel.
+
+    Un odómetro no retrocede. Aceptar un valor menor al que ya está guardado
+    es cómo se ensuciaron los datos de producción: quedan lecturas de 46.000
+    entre valores de 232.000, y esa cifra suelta se volvía la línea base de
+    los cálculos, dejando el vehículo entero en rojo.
+    """
+    if km_nuevo is None or not isinstance(km_nuevo, int):
+        return False, "El kilometraje debe ser un número entero."
+    if km_nuevo <= 0:
+        return False, "El kilometraje debe ser mayor que cero."
+    if km_nuevo > KM_MAXIMO_RAZONABLE:
+        return False, (f"{km_nuevo:,} km no parece un valor real. "
+                       "Revisa si se te fue un dígito de más.").replace(",", ".")
+    actual = km_actual or 0
+    if km_nuevo < actual:
+        return False, (f"El odómetro no puede retroceder: ya tienes registrados "
+                       f"{actual:,} km y escribiste {km_nuevo:,}. Si el dato guardado "
+                       "es el equivocado, corrígelo desde /perfil.").replace(",", ".")
+    return True, ""
+
+
+def validar_km_servicio(km_servicio, km_actual) -> tuple[bool, str]:
+    """
+    Valida el kilometraje de un SERVICIO que se registra en el historial.
+
+    A diferencia de una lectura, aquí sí es normal un valor menor al odómetro
+    actual: se puede registrar hoy un cambio de aceite hecho hace meses. Lo
+    que no puede es ser MAYOR que el odómetro — eso significa un servicio en
+    el futuro, y el motor de cálculo lo toma como línea base, dejando ese
+    control en verde para siempre. En producción hay un caso así: un servicio
+    a 105.000 km en un vehículo cuyo odómetro marca 47.300.
+    """
+    if km_servicio is None or not isinstance(km_servicio, int):
+        return False, "El kilometraje debe ser un número entero."
+    if km_servicio <= 0:
+        return False, "El kilometraje debe ser mayor que cero."
+    if km_servicio > KM_MAXIMO_RAZONABLE:
+        return False, (f"{km_servicio:,} km no parece un valor real. "
+                       "Revisa si se te fue un dígito de más.").replace(",", ".")
+    actual = km_actual or 0
+    if actual and km_servicio > actual:
+        return False, (f"El servicio no puede ser a más kilómetros que el odómetro: "
+                       f"tu vehículo marca {actual:,} km. Si ya avanzaste, registra "
+                       "primero la lectura nueva con /km.").replace(",", ".")
+    return True, ""
+
+
 def _a_fecha(texto: str | None) -> date | None:
     """Convierte 'YYYY-MM-DD' en un objeto date. Devuelve None si no hay dato."""
     if not texto:
