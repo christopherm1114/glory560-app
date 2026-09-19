@@ -320,16 +320,23 @@ def registrar_lectura_km(vehiculo_id: int, kilometraje: int, fecha: str | None =
 
 def km_base_vehiculo(vehiculo_id: int) -> int | None:
     """
-    Kilometraje con el que el vehículo entró al sistema (la lectura más baja
-    registrada). Sirve de punto de partida para los controles que todavía no
-    tienen ningún servicio en el historial.
+    Kilometraje con el que el vehículo entró al sistema: la PRIMERA lectura
+    en orden cronológico. Sirve de punto de partida para los controles que
+    todavía no tienen ningún servicio en el historial.
 
-    Devuelve None si el vehículo es anterior a este cambio y no tiene ninguna
-    lectura guardada; quien llama decide qué usar en ese caso.
+    Se ordena por fecha (y por id, para desempatar dos lecturas del mismo día),
+    NO por kilometraje. Parece equivalente y no lo es: nada impide teclear mal
+    el odómetro, y en la base real hay vehículos con una lectura suelta muy por
+    debajo del resto. Tomando el mínimo, esa cifra errónea se convertía en la
+    línea base y el auto aparecía con todo vencido; tomando la primera por
+    fecha, un error posterior no arrastra el cálculo hacia atrás.
+
+    Devuelve None si el vehículo no tiene ninguna lectura guardada; quien
+    llama decide qué usar en ese caso.
     """
     resp = (supabase.table("lecturas_km").select("kilometraje")
             .eq("vehiculo_id", vehiculo_id)
-            .order("kilometraje").limit(1).execute())
+            .order("fecha").order("id").limit(1).execute())
     if not resp.data:
         return None
     try:
@@ -375,11 +382,36 @@ def alerta_reciente_existe(vehiculo_id: int, tipo_id: int, dias: int = 7) -> boo
 
 # ==================== ESTADO DE CONVERSACIÓN ====================
 
+# Una conversación abandonada caduca a las 6 horas. Sin esto, quien dejaba un
+# registro a medias quedaba atrapado: días después, cualquier texto suelto que
+# escribiera se interpretaba como la respuesta a aquella pregunta olvidada, y
+# la única salida era adivinar /cancelar. En la base de producción había dos
+# usuarios atascados desde hacía semanas.
+HORAS_VIDA_CONVERSACION = 6
+
+
+def _conversacion_caducada(actualizado) -> bool:
+    """True si la conversación quedó abandonada hace más de las horas límite."""
+    if not actualizado:
+        return False
+    try:
+        momento = datetime.fromisoformat(str(actualizado).replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if momento.tzinfo is None:  # las filas viejas se guardaron sin zona horaria
+        momento = momento.replace(tzinfo=timezone.utc)
+    horas = (datetime.now(timezone.utc) - momento).total_seconds() / 3600
+    return horas > HORAS_VIDA_CONVERSACION
+
+
 def obtener_estado(telegram_id: int) -> dict:
     """Devuelve {paso, datos}. Si no hay nada, devuelve paso=None y datos={}."""
     resp = supabase.table("estado_conversacion").select("*").eq("telegram_id", telegram_id).execute()
     if resp.data:
         fila = resp.data[0]
+        if _conversacion_caducada(fila.get("actualizado")):
+            limpiar_estado(telegram_id)
+            return {"paso": None, "datos": {}}
         return {"paso": fila.get("paso"), "datos": fila.get("datos") or {}}
     return {"paso": None, "datos": {}}
 

@@ -224,11 +224,39 @@ def probar_infraestructura() -> None:
         revisar(len(intentos) == 1, "un error 400 de Telegram no se reintenta en vano")
 
 
+# =====================================================================
+# 5. CONVERSACIONES ABANDONADAS
+# =====================================================================
+
+def probar_conversaciones() -> None:
+    print("\n[5] Conversaciones abandonadas")
+    from datetime import datetime, timedelta, timezone
+    ahora = datetime.now(timezone.utc)
+
+    casos = [
+        (None, False, "una fila sin fecha no se descarta"),
+        ((ahora - timedelta(minutes=5)).isoformat(), False,
+         "una conversación de hace 5 minutos sigue viva"),
+        ((ahora - timedelta(hours=5)).isoformat(), False,
+         "a las 5 horas todavía sigue viva"),
+        ((ahora - timedelta(hours=7)).isoformat(), True,
+         "a las 7 horas ya caducó"),
+        ((ahora - timedelta(days=24)).isoformat(), True,
+         "una de hace 24 días caduca"),
+        ((ahora - timedelta(days=24)).replace(tzinfo=None).isoformat(), True,
+         "una fila vieja sin zona horaria también caduca"),
+        ("texto basura", False, "un valor ilegible no rompe nada"),
+    ]
+    for valor, esperado, descripcion in casos:
+        revisar(db._conversacion_caducada(valor) is esperado, descripcion)
+
+
 if __name__ == "__main__":
     probar_rutas()
     probar_calculo()
     probar_tarea()
     probar_infraestructura()
+    probar_conversaciones()
     print("\n" + "=" * 62)
     if _fallos:
         print(f"{len(_fallos)} PRUEBA(S) FALLARON:")

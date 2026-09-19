@@ -100,7 +100,15 @@ frente a una app genérica de mantenimiento; conservarla al hacer cambios.
    `db.alerta_reciente_existe` —esta última con lógica anti-spam de 7 días— no se llaman
    desde ningún lado. Decidir: cablearlas o sacarlas del esquema.
 
-6. Menores: `_a_entero` convierte `"45.5"` en `455`; los meses se aproximan como bloques
+6. **Nada valida el kilometraje que se teclea.** Las cinco rutas que escriben km
+   (`/km`, el registro, el perfil del bot, `/api/perfil`, el alta de mantenimientos)
+   aceptan cualquier número: menor que el odómetro actual, o con un dígito de más.
+   En la base real hay saltos de 232.000 a 46.000 y de 3.844 a 38.615. Eso ensucia
+   el gráfico, descuadra la línea base y deja servicios registrados a más km que el
+   propio odómetro. Falta una validación común en `db` (rechazar retrocesos y avisar
+   de saltos inverosímiles) con una vía clara para corregir un error de tipeo.
+
+7. Menores: `_a_entero` convierte `"45.5"` en `455`; los meses se aproximan como bloques
    de 30 días (~5 días de desfase al año); la sesión expira a los 12 minutos de inactividad.
 
 ### Resueltos (no volver a introducirlos)
@@ -114,6 +122,10 @@ frente a una app genérica de mantenimiento; conservarla al hacer cambios.
   la cabecera `X-Tasks-Token`.
 - Un vehículo sin historial parte de su kilometraje de registro, no de 0
   (`db.km_base_vehiculo`), así que ya no aparece todo en rojo el primer día.
+  La línea base es la **primera lectura por fecha**, no la más baja: hay
+  odómetros mal tecleados en la base y el mínimo tomaba esa cifra errónea.
+- Las conversaciones del bot caducan a las 6 horas (`db.HORAS_VIDA_CONVERSACION`).
+  Antes, quien abandonaba un registro a medias quedaba atrapado en ese paso.
 - Los comandos del bot avisan si el usuario no tiene vehículo, en vez de fallar en
   silencio; `procesar_update` registra la traza completa y le responde al usuario.
 
