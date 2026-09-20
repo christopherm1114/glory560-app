@@ -143,8 +143,16 @@ def buscar_usuario_por_telefono_normalizado(telefono_digitos: str) -> dict | Non
 
 
 def buscar_usuarios(texto: str) -> list[dict]:
-    """Busca usuarios por nombre o teléfono (para la viñeta de Roles)."""
-    patron = "%" + texto.replace(",", " ").strip() + "%"
+    """
+    Busca usuarios por nombre o teléfono (para la viñeta de Roles).
+
+    El texto se reduce a letras, números y espacios antes de construir el
+    patrón. El cliente de Supabase arma una consulta REST, no SQL, pero el
+    filtro se escribe como texto y caracteres como la coma, el punto o los
+    paréntesis alteran su estructura. Antes solo se neutralizaba la coma.
+    """
+    limpio = "".join(c for c in str(texto or "") if c.isalnum() or c.isspace())
+    patron = "%" + limpio.strip()[:60] + "%"
     resp = (supabase.table("usuarios").select("*")
             .or_(f"nombre.ilike.{patron},telefono.ilike.{patron}")
             .limit(20).execute())

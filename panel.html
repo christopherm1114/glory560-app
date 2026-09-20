@@ -369,9 +369,9 @@ function vistaPerfil(c, d){
   if(!d.vehiculo){ c.innerHTML='<div class="card">No tienes un vehículo registrado.</div>'; return; }
   const v=d.vehiculo;
   c.innerHTML = `<div class="card"><h2>Datos de mi vehículo</h2>
-    <div class="field">Placa</div><input id="p-placa" value="${v.placa||''}">
+    <div class="field">Placa</div><input id="p-placa" value="${esc(v.placa||'')}">
     <div class="grid2">
-      <div><div class="field">Año</div><input id="p-anio" value="${v.anio||''}"></div>
+      <div><div class="field">Año</div><input id="p-anio" value="${esc(v.anio||'')}"></div>
       <div><div class="field">Kilometraje actual</div><input id="p-km" value="${v.kilometraje||0}"></div>
     </div>
     <div class="grid2">
@@ -442,8 +442,15 @@ function vistaMant(c, d){
   $('#venc-nota').textContent=nota;
   const ult=d.ultimos||[];
   if(ult.length===0) $('#ult-vacio').classList.remove('oculto');
-  else $('#tb-ult').innerHTML = ult.map(r=>`<tr><td>${r.nombre}</td><td>${r.fecha||'-'}</td><td>${horaDe(r.creado_en)}</td><td>${r.costo!=null?money(r.costo):'-'}</td></tr>`).join('');
+  else $('#tb-ult').innerHTML = ult.map(r=>`<tr><td>${esc(r.nombre)}</td><td>${esc(r.fecha||'-')}</td><td>${horaDe(r.creado_en)}</td><td>${r.costo!=null?money(r.costo):'-'}</td></tr>`).join('');
   graficoKm(d.kilometraje_historial||[]);
+}
+function esc(v){
+  // Escapa lo que venga del servidor antes de meterlo en innerHTML.
+  // Sin esto, el nombre que un usuario teclea en el bot se ejecuta como
+  // codigo en el navegador del administrador cuando abre Aprobaciones.
+  return String(v==null?'':v).replace(/[&<>"']/g, c => (
+    {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 function horaDe(ts){ if(!ts) return '-'; try{ return new Date(ts).toLocaleTimeString('es-EC',{hour:'2-digit',minute:'2-digit'}); }catch(e){ return '-'; } }
 
@@ -451,18 +458,23 @@ function precioProm(r){
   if(r.precio_promedio==null) return '<span class="muted">sin datos</span>';
   return `<b>${money(r.precio_promedio)}</b> <span class="muted" style="font-size:11px">· ${r.conteo} reg.</span>`;
 }
-function verMercado(nombre, min, max, notaEnc){
-  const nota = notaEnc ? decodeURIComponent(notaEnc) : '';
+function verMercadoDe(btn){
+  const d=btn.dataset;
+  verMercado(d.mNombre, d.mMin===''?null:Number(d.mMin),
+             d.mMax===''?null:Number(d.mMax), d.mNota||'');
+}
+function verMercado(nombre, min, max, nota){
+  nota = nota || '';
   let cuerpo;
   if(min==null && max==null){
     cuerpo='<p class="muted">Aún no hay rango de referencia cargado para este mantenimiento.</p>';
   } else {
     cuerpo=`<div class="tile"><div class="k">Rango de mercado (referencial)</div><div class="v">${money(min)} – ${money(max)}</div></div>`
-      + (nota?`<p class="muted" style="margin-top:10px">${nota}</p>`:'');
+      + (nota?`<p class="muted" style="margin-top:10px">${esc(nota)}</p>`:'');
   }
   $('#modal-cont').innerHTML=`
     <div style="display:flex;justify-content:space-between;align-items:center">
-      <h2 style="margin:0">🏷️ Precio de mercado — ${nombre}</h2>
+      <h2 style="margin:0">🏷️ Precio de mercado — ${esc(nombre)}</h2>
       <button class="btn ghost sm" onclick="cerrarModal()">✕ Cerrar</button></div>
     <div style="margin-top:12px">${cuerpo}</div>
     <p class="muted" style="margin-top:14px;font-size:12px">Valores referenciales del mercado en Ecuador (USD). Pueden variar según el taller, la ciudad y la marca de los repuestos.</p>`;
@@ -478,12 +490,15 @@ function filaSemaforo(r){
   let colMercado;
   if(esInsp){ colMercado='<span class="muted" style="font-size:11px">—</span>'; }
   else {
-    const nom=(r.nombre||'').replace(/'/g,"\\'");
-    const mn=r.mercado_min!=null?r.mercado_min:'null', mx=r.mercado_max!=null?r.mercado_max:'null';
-    const notaEnc=encodeURIComponent(r.mercado_nota||'');
-    colMercado=`<button class="btn ghost sm" onclick="verMercado('${nom}', ${mn}, ${mx}, '${notaEnc}')">Precio Mercado</button>`;
+    // Los datos viajan en atributos data-*, nunca dentro del onclick: meter
+    // texto del servidor en un atributo que ADEMAS es codigo JS son dos
+    // contextos de escape anidados, y el de dentro siempre se puede burlar.
+    const mn=r.mercado_min!=null?r.mercado_min:'', mx=r.mercado_max!=null?r.mercado_max:'';
+    colMercado=`<button class="btn ghost sm" data-m-nombre="${esc(r.nombre||'')}"`
+      +` data-m-min="${esc(mn)}" data-m-max="${esc(mx)}" data-m-nota="${esc(r.mercado_nota||'')}"`
+      +` onclick="verMercadoDe(this)">Precio Mercado</button>`;
   }
-  return `<div class="sem"><span class="punto ${p}"></span><span style="flex:1">${r.nombre}</span>
+  return `<div class="sem"><span class="punto ${p}"></span><span style="flex:1">${esc(r.nombre)}</span>
     <span style="min-width:150px;text-align:right">${colPrecio}</span>
     <span class="muted" style="min-width:100px;text-align:right">${det} <span class="chip">${et}</span></span>
     <span style="min-width:120px;text-align:right">${colMercado}</span></div>`;
@@ -503,7 +518,7 @@ function pintarSemaforo(cont, proximos){
       <span class="muted" style="min-width:120px;text-align:right">Mercado</span></div>`;
   cats.forEach(cat=>{
     const lista=grupos[cat].slice().sort((a,b)=>orden[a.estado]-orden[b.estado]);
-    html+=`<div style="margin-top:12px;font-size:12px;font-weight:700;color:var(--brand);text-transform:uppercase;letter-spacing:.03em">${cat}</div>`;
+    html+=`<div style="margin-top:12px;font-size:12px;font-weight:700;color:var(--brand);text-transform:uppercase;letter-spacing:.03em">${esc(cat)}</div>`;
     html+=lista.map(filaSemaforo).join('');
   });
   cont.innerHTML=html;
@@ -523,8 +538,8 @@ function graficoKm(km){
 function vistaInsumos(c, d){
   if(!d.variante){ c.innerHTML='<div class="card">Sin vehículo.</div>'; return; }
   const v=d.variante;
-  const fila=(k,val)=>`<div class="sem"><span style="flex:1">${k}</span><span class="chip">${val}</span></div>`;
-  c.innerHTML = `<div class="card"><h2>Insumos de tu variante (${v.nombre})</h2>
+  const fila=(k,val)=>`<div class="sem"><span style="flex:1">${esc(k)}</span><span class="chip">${esc(val)}</span></div>`;
+  c.innerHTML = `<div class="card"><h2>Insumos de tu variante (${esc(v.nombre)})</h2>
     ${fila('Aceite de motor', v.aceite)}
     ${fila('Bujías', v.bujia)}
     ${fila('Líquido de transmisión', v.transmision_liquido)}
@@ -542,11 +557,11 @@ function vistaRecom(c, d){
   let html='<div class="card"><h2>💡 Recomendaciones para el conductor</h2>'
     +'<div class="muted" style="margin-bottom:6px">Chequeos periódicos para tener presentes y mantener tu Glory 560 en buen estado.</div>';
   cats.forEach(cat=>{
-    html+=`<div style="margin-top:12px;font-size:12px;font-weight:700;color:var(--brand);text-transform:uppercase">${cat}</div>`;
+    html+=`<div style="margin-top:12px;font-size:12px;font-weight:700;color:var(--brand);text-transform:uppercase">${esc(cat)}</div>`;
     grupos[cat].forEach(r=>{
       const cada = r.intervalo_km ? `cada ${numf(r.intervalo_km)} km` : (r.intervalo_meses?`cada ${r.intervalo_meses} meses`:'periódicamente');
       html+=`<div class="sem"><span class="punto p-good"></span>
-        <span style="flex:1">Recuerda que <b>${r.nombre}</b> se lo revisa ${cada}.${r.descripcion?` <span class="muted">${r.descripcion}</span>`:''}</span></div>`;
+        <span style="flex:1">Recuerda que <b>${esc(r.nombre)}</b> se lo revisa ${cada}.${r.descripcion?` <span class="muted">${esc(r.descripcion)}</span>`:''}</span></div>`;
     });
   });
   html+='</div>';
@@ -557,7 +572,7 @@ function vistaRecom(c, d){
 async function vistaRegistrados(c){
   if(!TIPOS){ const rt=await fetch('/api/tipos'); TIPOS=(await rt.json()).tipos||[]; }
   const r=await fetch('/api/mantenimientos'); REG_LISTA=(await r.json()).mantenimientos||[];
-  const opts='<option value="">Todos los tipos</option>'+TIPOS.map(t=>`<option value="${t.id}">${t.nombre}</option>`).join('');
+  const opts='<option value="">Todos los tipos</option>'+TIPOS.map(t=>`<option value="${t.id}">${esc(t.nombre)}</option>`).join('');
   c.innerHTML=`<div class="card">
     <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
       <h2 style="margin:0">Mantenimientos registrados</h2>
@@ -579,8 +594,8 @@ function pintarRegistrados(){
   if(items.length===0){ tb.innerHTML=''; $('#reg-vacio').classList.remove('oculto'); return; }
   $('#reg-vacio').classList.add('oculto');
   tb.innerHTML=items.map(x=>`<tr>
-    <td>${x.nombre}</td><td>${x.fecha||'-'}</td><td>${horaDe(x.creado_en)}</td>
-    <td>${numf(x.km)}</td><td>${x.costo!=null?money(x.costo):'-'}</td><td>${x.taller||'-'}</td>
+    <td>${esc(x.nombre)}</td><td>${esc(x.fecha||'-')}</td><td>${horaDe(x.creado_en)}</td>
+    <td>${numf(x.km)}</td><td>${x.costo!=null?money(x.costo):'-'}</td><td>${esc(x.taller||'-')}</td>
     <td style="text-align:right"><button class="btn no sm" title="Eliminar" onclick="eliminarMant(${x.id})">🗑</button></td></tr>`).join('');
 }
 async function eliminarMant(id){
@@ -590,7 +605,7 @@ async function eliminarMant(id){
   vistaRegistrados($('#contenido'));
 }
 function abrirFormMant(){
-  const opts=TIPOS.map(t=>`<option value="${t.id}">${t.nombre}</option>`).join('');
+  const opts=TIPOS.map(t=>`<option value="${t.id}">${esc(t.nombre)}</option>`).join('');
   $('#modal-cont').innerHTML=`
     <div style="display:flex;justify-content:space-between;align-items:center">
       <h2 style="margin:0">➕ Registrar mantenimiento</h2>
@@ -624,7 +639,7 @@ async function vistaAprobaciones(c){
   const p=d.pendientes||[];
   c.innerHTML = `<div class="card"><h2>Solicitudes pendientes ${p.length?`<span class="badge">${p.length}</span>`:''}</h2>
     <div id="lista-aprob">${p.length?'':'<div class="muted">No hay solicitudes pendientes.</div>'}</div></div>`;
-  $('#lista-aprob').innerHTML = p.map(x=>`<div class="sem"><span style="flex:1">${x.nombre} · ${x.telefono} · Placa ${x.placa}</span>
+  $('#lista-aprob').innerHTML = p.map(x=>`<div class="sem"><span style="flex:1">${esc(x.nombre)} · ${esc(x.telefono)} · Placa ${esc(x.placa)}</span>
     <button class="btn ok sm" onclick="aprobar(${x.id})">Aprobar</button>
     <button class="btn no sm" onclick="rechazar(${x.id})">Rechazar</button></div>`).join('');
 }
@@ -637,25 +652,25 @@ async function vistaUsuarios(c){
   const u=d.usuarios||[];
   c.innerHTML = `<div class="card"><h2>Usuarios registrados (${u.length})</h2>
     <div style="overflow-x:auto"><table><thead><tr><th>Nombre</th><th>Teléfono</th><th>Vehículo</th><th></th></tr></thead>
-    <tbody>${u.map(x=>`<tr><td>${x.nombre} ${x.rol==='admin'?'<span class="chip">admin</span>':''}</td><td>${x.telefono}</td>
-      <td>${x.placa} · ${x.variante}</td><td><button class="btn ghost sm" onclick="verUsuario(${x.id})">Ver ▸</button></td></tr>`).join('')}</tbody></table></div></div>`;
+    <tbody>${u.map(x=>`<tr><td>${esc(x.nombre)} ${x.rol==='admin'?'<span class="chip">admin</span>':''}</td><td>${esc(x.telefono)}</td>
+      <td>${esc(x.placa)} · ${esc(x.variante)}</td><td><button class="btn ghost sm" onclick="verUsuario(${x.id})">Ver ▸</button></td></tr>`).join('')}</tbody></table></div></div>`;
 }
 async function verUsuario(id){
   const r=await fetch('/api/usuario/'+id); const d=await r.json();
   $('#modal').classList.remove('oculto');
   const v=d.vehiculo, va=d.variante;
   $('#modal-cont').innerHTML = `
-    <div style="display:flex;justify-content:space-between;align-items:center"><h2 style="margin:0">${d.usuario.nombre}</h2>
+    <div style="display:flex;justify-content:space-between;align-items:center"><h2 style="margin:0">${esc(d.usuario.nombre)}</h2>
       <button class="btn ghost sm" onclick="cerrarModal()">✕ Cerrar</button></div>
-    <div class="muted" style="margin-bottom:12px">${d.usuario.telefono} · ${va?va.nombre:'-'}</div>
+    <div class="muted" style="margin-bottom:12px">${esc(d.usuario.telefono)} · ${esc(va?va.nombre:'-')}</div>
     <div class="grid3">
-      <div class="card"><h2>Vehículo</h2>Placa: <b>${v?v.placa:'-'}</b><br>Año: ${v?v.anio||'-':'-'}<br>Km: ${v?numf(v.kilometraje):'-'}<br>Aceite: ${va?va.aceite:'-'}</div>
+      <div class="card"><h2>Vehículo</h2>Placa: <b>${esc(v?v.placa:'-')}</b><br>Año: ${esc(v?v.anio||'-':'-')}<br>Km: ${v?numf(v.kilometraje):'-'}<br>Aceite: ${esc(va?va.aceite:'-')}</div>
       <div class="card"><h2>Total gastos</h2><div class="tile"><div class="v">${money(d.total_gastos)}</div></div></div>
       <div class="card"><h2>Historial km</h2><canvas id="cv-km2" height="120"></canvas><div id="km2-vacio" class="muted oculto">Sin datos</div></div>
     </div>
     <div class="card"><h2>Semáforo</h2><div style="overflow-x:auto"><div id="sem2" style="min-width:600px"></div></div></div>
     <div class="card"><h2>Historial de registros</h2><div style="overflow-x:auto"><table><thead><tr><th>Descripción</th><th>Fecha</th><th>Hora</th><th>Km</th><th>Precio</th></tr></thead>
-      <tbody>${(d.historial||[]).map(x=>`<tr><td>${x.nombre}</td><td>${x.fecha||'-'}</td><td>${horaDe(x.creado_en)}</td><td>${numf(x.km)}</td><td>${x.costo!=null?money(x.costo):'-'}</td></tr>`).join('')||'<tr><td colspan=5 class="muted">Sin registros</td></tr>'}</tbody></table></div></div>`;
+      <tbody>${(d.historial||[]).map(x=>`<tr><td>${esc(x.nombre)}</td><td>${esc(x.fecha||'-')}</td><td>${horaDe(x.creado_en)}</td><td>${numf(x.km)}</td><td>${x.costo!=null?money(x.costo):'-'}</td></tr>`).join('')||'<tr><td colspan=5 class="muted">Sin registros</td></tr>'}</tbody></table></div></div>`;
   pintarSemaforo($('#sem2'), d.proximos);
   const km=d.kilometraje_historial||[];
   if(typeof Chart!=='undefined' && km.length>=2){
@@ -679,7 +694,7 @@ async function buscarRoles(){
   const res=d.resultados||[];
   $('#r-res').innerHTML = res.length? res.map(x=>{
     const esAdmin=x.rol==='admin';
-    return `<div class="sem"><span style="flex:1">${x.nombre} · ${x.telefono}</span>
+    return `<div class="sem"><span style="flex:1">${esc(x.nombre)} · ${esc(x.telefono)}</span>
       <span class="chip">Rol: ${esAdmin?'Admin':'Usuario'}</span>
       <button class="btn ${esAdmin?'no':''} sm" onclick="cambiarRol(${x.id}, '${esAdmin?'usuario':'admin'}')">${esAdmin?'Quitar admin':'Hacer administrador'}</button></div>`;
   }).join('') : '<div class="muted">Sin resultados.</div>';

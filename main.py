@@ -28,6 +28,42 @@ import web
 
 app = FastAPI(title="Control de Mantenimientos Glory 560")
 
+
+@app.middleware("http")
+async def cabeceras_seguridad(request: Request, call_next):
+    """
+    Añade las cabeceras de seguridad que el navegador necesita para defender
+    al usuario. Sin ellas el panel se podía incrustar en una página ajena
+    (clickjacking) y no había nada que limitara la ejecución de scripts.
+
+    La CSP es la más importante: aunque se escape todo lo que se pinta, es la
+    red que atrapa cualquier inyección que se escape en el futuro. El
+    'unsafe-inline' es necesario porque panel.html lleva su CSS y su
+    JavaScript dentro del propio archivo; el día que se separen en archivos
+    aparte hay que quitarlo, y solo entonces la CSP protegerá de verdad.
+    """
+    respuesta = await call_next(request)
+    respuesta.headers["X-Frame-Options"] = "DENY"
+    respuesta.headers["X-Content-Type-Options"] = "nosniff"
+    respuesta.headers["Referrer-Policy"] = "no-referrer"
+    respuesta.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+    respuesta.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    respuesta.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        # Chart.js se sirve desde este CDN; ninguna otra fuente está permitida.
+        "script-src 'self' https://cdnjs.cloudflare.com 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline'; "
+        # Las seis imágenes del panel van incrustadas como data: URI.
+        "img-src 'self' data:; "
+        "connect-src 'self'; "
+        "base-uri 'none'; "
+        "form-action 'self'; "
+        "frame-ancestors 'none'; "
+        "object-src 'none'"
+    )
+    return respuesta
+
+
 # Rutas de la web (/panel, /api/login, /api/mis-datos, /api/usuarios, ...).
 app.include_router(web.router)
 

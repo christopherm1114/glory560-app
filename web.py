@@ -33,6 +33,8 @@ from fastapi.responses import HTMLResponse, JSONResponse
 
 from datetime import datetime, timezone, timedelta
 
+import hmac
+
 import db
 import auth
 import mantenimiento
@@ -48,13 +50,52 @@ with open(_RUTA_HTML, encoding="utf-8") as f:
 
 # ---------- Ayudas ----------
 
+def _ip_cliente(request: Request) -> str:
+    """
+    Identifica al cliente para contar sus intentos fallidos.
+
+    En Render la petición llega a través de Cloudflare, que escribe la IP real
+    en 'cf-connecting-ip'. Esa es la fiable. 'x-forwarded-for' la puede
+    falsificar quien llama, así que se usa solo como respaldo y sabiendo que
+    un atacante decidido puede rotarla: por eso el límite por cuenta, que no
+    depende de la IP, es la mitad importante de esta defensa.
+    """
+    cf = request.headers.get("cf-connecting-ip")
+    if cf:
+        return cf.strip()
+    reenviada = request.headers.get("x-forwarded-for", "")
+    if reenviada:
+        return reenviada.split(",")[0].strip()
+    return request.client.host if request.client else "desconocida"
+
+
+def _demasiados_intentos(*claves: str):
+    """
+    Devuelve una respuesta 429 si alguna de las claves agotó sus intentos,
+    o None si se puede continuar.
+    """
+    for clave in claves:
+        if not auth.intento_permitido(clave):
+            espera = auth.segundos_para_reintentar(clave)
+            return JSONResponse(
+                {"error": "demasiados_intentos", "reintentar_en": espera},
+                status_code=429)
+    return None
+
+
 def _usuario_actual(request: Request) -> dict | None:
     """Devuelve el usuario de la sesión (según la cookie) o None."""
-    uid = auth.leer_cookie_sesion(request.cookies.get("sesion"))
-    if not uid:
+    leido = auth.leer_cookie_sesion(request.cookies.get("sesion"))
+    if not leido:
         return None
+    uid, marca = leido
     u = db.obtener_usuario(uid)
     if not u or u.get("estado") != "aprobado":
+        return None
+    # Si la contraseña cambió después de emitirse la cookie, la marca ya no
+    # coincide y la sesión queda invalidada. Así, cambiar la contraseña
+    # expulsa de verdad a quien estuviera dentro.
+    if marca != auth.marca_credencial(u.get("clave_hash")):
         return None
     return u
 
@@ -154,11 +195,25 @@ def panel():
 # ---------- Sesión ----------
 
 @router.post("/api/login")
-def api_login(datos: dict = Body(...)):
+def api_login(request: Request, datos: dict = Body(...)):
+    # Se frena ANTES de consultar la base de datos: validar_login descarga la
+    # tabla de usuarios entera, así que cada intento sin freno era además una
+    # forma barata de tumbar el servicio.
+    usuario_pedido = auth.normalizar_telefono(datos.get("usuario", ""))
+    clave_ip = f"login:ip:{_ip_cliente(request)}"
+    clave_cuenta = f"login:cuenta:{usuario_pedido}"
+    frenado = _demasiados_intentos(clave_ip, clave_cuenta)
+    if frenado:
+        return frenado
+
     persona = auth.validar_login(datos.get("usuario", ""), datos.get("contrasena", ""))
     if not persona:
+        auth.registrar_fallo(clave_ip)
+        auth.registrar_fallo(clave_cuenta)
         return JSONResponse({"error": "credenciales_invalidas"}, status_code=401)
-    cookie = auth.crear_cookie_sesion(persona["id"])
+    auth.limpiar_intentos(clave_ip)
+    auth.limpiar_intentos(clave_cuenta)
+    cookie = auth.crear_cookie_sesion(persona["id"], persona.get("clave_hash"))
     resp = JSONResponse({"ok": True, "rol": persona.get("rol", "usuario"), "nombre": persona["nombre"]})
     resp.set_cookie("sesion", cookie, httponly=True, secure=True, samesite="lax",
                     max_age=auth.MINUTOS_SESION * 60)
@@ -188,17 +243,33 @@ def api_cambiar_clave(request: Request, datos: dict = Body(...)):
         return JSONResponse({"error": "no_coinciden"}, status_code=400)
     if not auth.contrasena_valida(nueva):
         return JSONResponse({"error": "debil"}, status_code=400)
-    db.actualizar_clave_hash(u["id"], auth.hash_password(nueva))
-    return {"ok": True}
+    nuevo_hash = auth.hash_password(nueva)
+    db.actualizar_clave_hash(u["id"], nuevo_hash)
+    # El cambio invalida todas las sesiones, incluida la de quien lo hace: se
+    # le entrega una cookie nueva para que no se quede fuera de su propia
+    # pantalla, mientras cualquier otra sesion abierta muere aqui.
+    resp = JSONResponse({"ok": True})
+    resp.set_cookie("sesion", auth.crear_cookie_sesion(u["id"], nuevo_hash),
+                    httponly=True, secure=True, samesite="lax",
+                    max_age=auth.MINUTOS_SESION * 60)
+    return resp
 
 
 # ---------- Contraseña: recuperación por Telegram ----------
 
 @router.post("/api/recuperar/solicitar")
-def api_recuperar_solicitar(datos: dict = Body(...)):
+def api_recuperar_solicitar(request: Request, datos: dict = Body(...)):
     """Envía un código de 6 dígitos por Telegram. Siempre responde 'ok'
     (no revelamos si el teléfono existe o no)."""
     tel = auth.normalizar_telefono(datos.get("telefono", ""))
+    # Sin freno, esta ruta es un cañón de mensajes de Telegram contra el
+    # teléfono de cualquier usuario registrado.
+    frenado = _demasiados_intentos(f"reset:pedir:{_ip_cliente(request)}",
+                                   f"reset:pedir:{tel}")
+    if frenado:
+        return frenado
+    auth.registrar_fallo(f"reset:pedir:{_ip_cliente(request)}")
+    auth.registrar_fallo(f"reset:pedir:{tel}")
     persona = db.buscar_usuario_por_telefono_normalizado(tel)
     if persona and persona.get("estado") == "aprobado" and persona.get("telegram_id"):
         codigo = auth.generar_codigo()
@@ -216,16 +287,35 @@ def api_recuperar_solicitar(datos: dict = Body(...)):
 
 
 @router.post("/api/recuperar/confirmar")
-def api_recuperar_confirmar(datos: dict = Body(...)):
+def api_recuperar_confirmar(request: Request, datos: dict = Body(...)):
     tel = auth.normalizar_telefono(datos.get("telefono", ""))
     codigo = str(datos.get("codigo", "")).strip()
     nueva = datos.get("nueva", "")
     repetir = datos.get("repetir", "")
 
+    # El código es de seis dígitos: sin límite de intentos se agota por fuerza
+    # bruta. Con cinco intentos por ventana, adivinarlo deja de ser viable.
+    clave_ip = f"reset:probar:{_ip_cliente(request)}"
+    clave_cuenta = f"reset:probar:{tel}"
+    frenado = _demasiados_intentos(clave_ip, clave_cuenta)
+    if frenado:
+        return frenado
+
     persona = db.buscar_usuario_por_telefono_normalizado(tel)
     if not persona:
+        auth.registrar_fallo(clave_ip)
+        auth.registrar_fallo(clave_cuenta)
         return JSONResponse({"error": "codigo_invalido"}, status_code=400)
-    if not persona.get("reset_codigo") or persona["reset_codigo"] != codigo:
+    guardado = persona.get("reset_codigo") or ""
+    # Comparación en tiempo constante: con != el tiempo de respuesta filtra
+    # cuántos dígitos iniciales se acertaron (Hallazgo 10).
+    if not guardado or not hmac.compare_digest(str(guardado), codigo):
+        auth.registrar_fallo(clave_ip)
+        auth.registrar_fallo(clave_cuenta)
+        # Tras agotar los intentos, el código deja de servir aunque siga
+        # vigente: si no, el atacante espera a que pase la ventana y sigue.
+        if not auth.intento_permitido(clave_cuenta):
+            db.limpiar_reset(persona["id"])
         return JSONResponse({"error": "codigo_invalido"}, status_code=400)
     # ¿Vigente?
     try:
@@ -240,6 +330,8 @@ def api_recuperar_confirmar(datos: dict = Body(...)):
 
     db.actualizar_clave_hash(persona["id"], auth.hash_password(nueva))
     db.limpiar_reset(persona["id"])
+    auth.limpiar_intentos(clave_ip)
+    auth.limpiar_intentos(clave_cuenta)
     return {"ok": True}
 
 
@@ -251,7 +343,11 @@ def api_sesion(request: Request):
     # Renovamos la cookie (sesión "deslizante"): mientras el usuario esté
     # activo, la app llama a esta ruta y la sesión se mantiene viva.
     resp = JSONResponse({"nombre": u["nombre"], "rol": u.get("rol", "usuario"), "telefono": u["telefono"]})
-    resp.set_cookie("sesion", auth.crear_cookie_sesion(u["id"]), httponly=True, secure=True,
+    # La cookie renovada debe llevar la marca de la credencial VIGENTE; si se
+    # emitiera sin ella, la comprobacion de _usuario_actual fallaria en la
+    # siguiente peticion y el usuario quedaria fuera cada pocos segundos.
+    resp.set_cookie("sesion", auth.crear_cookie_sesion(u["id"], u.get("clave_hash")),
+                    httponly=True, secure=True,
                     samesite="lax", max_age=auth.MINUTOS_SESION * 60)
     return resp
 
