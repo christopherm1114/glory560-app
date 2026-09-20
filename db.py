@@ -128,15 +128,47 @@ def listar_usuarios_aprobados() -> list[dict]:
     return resp.data or []
 
 
+# ¿Existe la columna telefono_normalizado? Se averigua una sola vez, al primer
+# uso. Permite desplegar el código antes de ejecutar migrations/002 sin que
+# nada se rompa: mientras la columna no esté, se usa el camino antiguo.
+_hay_telefono_normalizado: bool | None = None
+
+
+def _soporta_telefono_normalizado() -> bool:
+    global _hay_telefono_normalizado
+    if _hay_telefono_normalizado is None:
+        try:
+            supabase.table("usuarios").select("telefono_normalizado").limit(1).execute()
+            _hay_telefono_normalizado = True
+        except Exception:
+            print("[db] AVISO: falta la columna telefono_normalizado. "
+                  "Ejecuta migrations/002_rendimiento_consultas.sql en Supabase; "
+                  "mientras tanto cada login recorre la tabla usuarios entera.")
+            _hay_telefono_normalizado = False
+    return _hay_telefono_normalizado
+
+
 def buscar_usuario_por_telefono_normalizado(telefono_digitos: str) -> dict | None:
     """
     Busca por teléfono comparando solo los dígitos. Es tolerante al código de
     país: '0999123456', '+593 999123456' y '593999123456' se consideran el mismo
     número (comparando los últimos 9 dígitos). Así el prefijo +593 no rompe nada.
+
+    Con la migración 002 aplicada resuelve con una consulta indexada. Antes
+    descargaba la tabla 'usuarios' completa y filtraba en Python, en CADA
+    intento de login —incluidos los fallidos—, lo que la convertía en una vía
+    barata para agotar la memoria del servicio.
     """
     if not telefono_digitos:
         return None
     obj9 = telefono_digitos[-9:]
+
+    if _soporta_telefono_normalizado():
+        resp = (supabase.table("usuarios").select("*")
+                .eq("telefono_normalizado", obj9).limit(1).execute())
+        return resp.data[0] if resp.data else None
+
+    # Camino antiguo, solo mientras la migración 002 no se haya ejecutado.
     for u in supabase.table("usuarios").select("*").execute().data or []:
         guardado = "".join(c for c in str(u.get("telefono") or "") if c.isdigit())
         if not guardado:
@@ -282,12 +314,41 @@ def historial(vehiculo_id: int, limite: int = 15) -> list[dict]:
     return resp.data or []
 
 
+# Igual que con la columna: se prueba una vez y se recuerda el resultado.
+_hay_promedios_en_postgres: bool | None = None
+
+
+def _promedios_con_postgres(costo_max: float) -> dict | None:
+    """Pide el promedio a la función SQL. Devuelve None si no está disponible."""
+    global _hay_promedios_en_postgres
+    try:
+        resp = supabase.rpc("promedios_por_tipo", {"costo_max": costo_max}).execute()
+    except Exception:
+        if _hay_promedios_en_postgres is None:
+            print("[db] AVISO: falta la función promedios_por_tipo. "
+                  "Ejecuta migrations/002_rendimiento_consultas.sql en Supabase.")
+        _hay_promedios_en_postgres = False
+        return None
+    _hay_promedios_en_postgres = True
+    return {f["tipo_mantenimiento_id"]: {"promedio": float(f["promedio"]),
+                                         "conteo": int(f["conteo"])}
+            for f in (resp.data or [])}
+
+
 def promedios_por_tipo(costo_max: float = 5000.0) -> dict:
     """
     Precio promedio de CADA tipo de mantenimiento, con los costos que registran
     TODOS los usuarios. Ignora costos no positivos o exageradamente altos
     (errores de tipeo). Devuelve {tipo_id: {"promedio": x, "conteo": n}}.
     """
+    # Con la migración 002 el promedio lo calcula Postgres, que para eso está.
+    # Antes se descargaban todos los mantenimientos de todos los usuarios en
+    # cada carga del panel para sumarlos en Python.
+    if _hay_promedios_en_postgres is not False:
+        agregado = _promedios_con_postgres(costo_max)
+        if agregado is not None:
+            return agregado
+
     resp = supabase.table("mantenimientos").select("tipo_mantenimiento_id, costo").execute()
     acumulado: dict[int, list[float]] = {}
     for r in resp.data or []:
