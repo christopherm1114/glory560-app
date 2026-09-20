@@ -18,9 +18,11 @@ Navegador ─────┼──▶ FastAPI (1 proceso) ──▶ Supabase (Po
 cron-job.org ──┘                        └──▶ API de Telegram
 ```
 
-Todos los archivos están en un solo nivel, sin carpetas. Fue una decisión deliberada
-para simplificar la subida a GitHub por la interfaz web; conviene mantenerla salvo
-que haya una razón fuerte para cambiarla.
+El código está en un solo nivel, sin carpetas. Fue una decisión deliberada para
+simplificar la subida a GitHub por la interfaz web. Ya se trabaja con git, así que
+la razón original caducó, pero mover los módulos ahora sería ruido sin beneficio.
+Sí hay tres carpetas auxiliares: `migrations/` (cambios de esquema versionados),
+`estaticos/` (las imágenes del panel) y `.github/workflows/` (las pruebas en cada push).
 
 | Archivo | Responsabilidad |
 |---|---|
@@ -35,6 +37,8 @@ que haya una razón fuerte para cambiarla.
 | `telegram.py` | Cliente de la API de Telegram. |
 | `tareas.py` | Recordatorio diario de kilometraje. |
 | `pruebas.py` | Pruebas de humo. No tocan Supabase ni Telegram; correrlas antes de fusionar. |
+| `estaticos/` | Imágenes del panel, servidas con caché de un año. Antes iban incrustadas en `panel.html` como base64 y no se podían cachear. |
+| `.github/workflows/` | Ejecuta `pruebas.py` en cada push y cada pull request. |
 | `schema.sql` / `seed.sql` | Estructura y catálogo inicial. |
 
 ## Convenciones del código
@@ -49,6 +53,10 @@ que haya una razón fuerte para cambiarla.
 - Las funciones de `handlers.py` son **síncronas**; `main.py` las despacha con
   `BackgroundTasks`, que las corre en un hilo aparte. No convertirlas a `async`
   sin cambiar también el punto de llamada.
+- **Las imágenes del panel viven en `estaticos/`, no dentro del HTML.** Si añades una,
+  registra su tipo MIME en `main.py` si no es de los habituales: con la cabecera
+  `nosniff` que declaramos, un tipo equivocado hace que el navegador se niegue a
+  dibujarla. Los `.webp` son justamente ese caso.
 - **Ninguna ruta de `main.py` puede tardar en responder.** El webhook contesta 200 a
   Telegram *antes* de procesar (si tarda, Telegram reenvía el update y se duplican los
   registros), y `/tasks/revisar-vencimientos` devuelve `ok` de inmediato y trabaja en
@@ -142,9 +150,17 @@ frente a una app genérica de mantenimiento; conservarla al hacer cambios.
   `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `ADMIN_TELEGRAM_ID`. Opcional pero recomendada:
   `TASKS_TOKEN` y `SESSION_SECRET` (si faltan, caen al secreto del webhook y al token del
   bot respectivamente, y lo avisan en el log).
-- **Cron:** dos trabajos distintos. `GET /salud` cada 10 minutos (mantiene despierto el
-  servicio de Render, que duerme a los 15 minutos sin tráfico) y
-  `GET /tasks/revisar-vencimientos` con el token, una vez al día a las 08:00.
+- **Cron:** tres trabajos distintos. `GET /salud` cada 10 minutos (mantiene despierto el
+  servicio de Render, que duerme a los 15 minutos sin tráfico);
+  `GET /tasks/revisar-vencimientos` con el token, una vez al día a las 08:00; y
+  `GET /tasks/respaldo` con el token, una vez por semana.
+- **Respaldos:** `/tasks/respaldo` exporta las ocho tablas y se las manda al
+  administrador por Telegram como archivo JSON. Omite `usuarios.clave` y
+  `usuarios.reset_codigo` a propósito: una copia con credenciales dentro las
+  esparciría a cada lugar donde se guarde el respaldo.
+- **Errores:** los fallos del bot, de la tarea y del respaldo se avisan por Telegram al
+  administrador (`telegram.avisar_al_admin`), con un tope de un aviso igual cada media
+  hora. Antes solo quedaban en los registros de Render, que rotan y nadie mira.
 - La clave de Supabase es `service_role`: **ignora RLS por completo**. Toda la
   autorización descansa en `web._usuario_actual` y `web._solo_admin`. Al agregar
   cualquier ruta nueva a `web.py`, la primera línea debe ser una de esas dos
