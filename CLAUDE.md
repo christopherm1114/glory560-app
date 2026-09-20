@@ -81,53 +81,58 @@ frente a una app genérica de mantenimiento; conservarla al hacer cambios.
 
 ## Problemas conocidos (pendientes, en orden de prioridad)
 
-1. **La contraseña inicial es el número de teléfono, guardada en claro** en
-   `usuarios.clave` (`db.crear_usuario`). `auth.verificar_credencial` acepta como válida
-   la comparación de los últimos 9 dígitos del teléfono. Hay que forzar el cambio de
-   contraseña en el primer ingreso y luego eliminar la columna `clave`.
+1. **La clave `service_role` anula RLS: toda la autorización vive en el código.** Es el
+   único hallazgo de la auditoría que sigue abierto, y no es un descuido sino un rediseño:
+   la app tiene su propia autenticación (cookie firmada), así que Postgres no sabe quién
+   es el usuario y no puede aplicar políticas por fila. Resolverlo de verdad exige adoptar
+   Supabase Auth o emitir JWT por usuario firmados con el secreto del proyecto, y recién
+   entonces migrar a la clave `anon` con RLS. Mientras tanto la defensa es la disciplina:
+   **la primera línea de toda ruta nueva en `web.py` debe ser `_usuario_actual` o
+   `_solo_admin`.** Las 20 rutas actuales cumplen; `pruebas.py` no lo verifica todavía.
 
-2. **`supabase-py 2.7.4` solo acepta claves con formato JWT.** Valida la clave contra una
-   expresión regular de tres segmentos separados por puntos (ver `supabase/_sync/client.py`).
-   Las claves nuevas de Supabase (`sb_secret_...`) **no pasan** esa validación: el proceso
-   muere al arrancar con `SupabaseException: Invalid API key`. Mientras la clave sea la JWT
-   antigua (`eyJ...`) funciona, pero Supabase está retirando ese formato. Antes de rotar la
-   clave hay que subir `supabase-py`.
+2. **Terminar de retirar la contraseña heredada.** El cambio ya es obligatorio en la
+   práctica, pero la columna `usuarios.clave` sigue existiendo y `auth.verificar_credencial`
+   conserva la rama que acepta el teléfono. Cuando los tres usuarios hayan definido su
+   contraseña: quitar esa rama y ejecutar `ALTER TABLE usuarios DROP COLUMN clave`.
 
-3. **Datos sucios heredados en producción.** El bug de `_a_entero` (ya corregido) dejó
-   lecturas diez veces mayores de lo tecleado: `3861.5` se guardó como `38615`. Los valores
-   afectados siguen ahí. El vehículo GPZ0327 arrastra además una primera lectura de 5.000 km
-   —de prueba— que es su línea base, y un servicio registrado a 105.000 km con el odómetro
-   en 47.300. Mientras no se limpien, ese vehículo muestra 27 controles vencidos aunque el
-   código sea correcto. Limpiarlo son escrituras sobre producción: preguntar antes.
+3. **`supabase-py 2.7.4` solo acepta claves con formato JWT.** Las claves nuevas de
+   Supabase (`sb_secret_...`) no pasan su validación y el proceso muere al arrancar con
+   `SupabaseException: Invalid API key`. Antes de rotar la clave hay que subir la librería.
 
-4. **Consultas que descargan tablas completas.**
-   `db.buscar_usuario_por_telefono_normalizado` trae toda la tabla `usuarios` y filtra en
-   Python — en cada login. `db.promedios_por_tipo` trae todos los mantenimientos de todos
-   los usuarios en cada carga del panel.
-   Solución: columna `telefono_normalizado` indexada, y agregaciones en Postgres.
+4. **Datos sucios heredados en producción.** El bug de `_a_entero` (corregido) dejó lecturas
+   diez veces mayores de lo tecleado. El vehículo GPZ0327 arrastra además una primera
+   lectura de 5.000 km —de prueba— que es su línea base, y un servicio registrado a
+   105.000 km con el odómetro en 47.300, por lo que muestra 27 controles vencidos aunque
+   el código sea correcto. Limpiarlo son escrituras sobre producción: preguntar antes.
 
 5. **La tabla `alertas` está definida pero nadie la usa.** `db.crear_alerta` y
-   `db.alerta_reciente_existe` —esta última con lógica anti-spam de 7 días— no se llaman
-   desde ningún lado. Decidir: cablearlas o sacarlas del esquema.
+   `db.alerta_reciente_existe` no se llaman desde ningún lado. Decidir: cablearlas o
+   sacarlas del esquema.
 
 6. Menores: los meses se aproximan como bloques de 30 días (~5 días de desfase al año);
-   la sesión expira a los 12 minutos de inactividad.
+   la sesión expira a los 12 minutos de inactividad; el limitador de intentos vive en
+   memoria, así que se reinicia con el proceso y no se comparte entre instancias.
 
 ### Resueltos (no volver a introducirlos)
 
-- `schema.sql` está al día, y `migrations/001_alinear_esquema.sql` pone al día una base
-  vieja. Verificado contra el Supabase real: la migración corrió.
 - El keep-alive vive en `/salud`, separado de la tarea de recordatorios.
-- El webhook responde 200 antes de procesar, así Telegram no reenvía updates duplicados.
-- La tarea usa `TASKS_TOKEN` propio y acepta la cabecera `X-Tasks-Token`.
-- La cookie de sesión se firma con `SESSION_SECRET`, no con el token del bot.
-- Un vehículo sin historial parte de su kilometraje de registro (`db.km_base_vehiculo`),
-  tomando la **primera lectura por fecha**, no la más baja.
-- Las conversaciones del bot caducan a las 6 horas (`db.HORAS_VIDA_CONVERSACION`).
-- `_a_entero` entiende la notación local: el punto es separador de miles solo si lo siguen
-  tres dígitos. Antes convertía `3861.5` en `38615`.
-- El kilometraje se valida al entrar (`mantenimiento.validar_lectura_km` y
-  `validar_km_servicio`), en el bot y en el panel.
+- El webhook responde 200 antes de procesar: Telegram no reenvía updates duplicados.
+- `TASKS_TOKEN` y `SESSION_SECRET` propios, con respaldo y aviso en el log si faltan.
+- Línea base de kilometraje = primera lectura por fecha (`db.km_base_vehiculo`).
+- Las conversaciones del bot caducan a las 6 horas.
+- `_a_entero` entiende la notación local: `3861.5` ya no se guarda como `38615`.
+- El kilometraje se valida al entrar, en el bot y en el panel.
+- **XSS:** `panel.html` escapa con `esc()` todo lo que viene del servidor, y el botón de
+  precio de mercado pasa sus datos por `data-*` en vez de por el `onclick`.
+- **Fuerza bruta:** limitador por IP y por cuenta en login y recuperación (`auth.py`).
+- **Cabeceras:** CSP, HSTS, X-Frame-Options y compañía, en un middleware de `main.py`.
+- **Sesiones:** la cookie lleva una marca de la contraseña vigente, así que cambiarla
+  invalida las sesiones abiertas.
+- **Contraseña inicial:** las cuentas nuevas no nacen con el teléfono como clave, y la
+  sesión heredada solo sirve para definir una contraseña propia.
+- **Consultas:** con `migrations/002` el login resuelve con un índice y los promedios los
+  calcula Postgres. `db.py` detecta si la migración está aplicada y usa el camino antiguo
+  si no, así que desplegar y migrar no tienen que coincidir en el tiempo.
 
 ## Seguridad y despliegue
 

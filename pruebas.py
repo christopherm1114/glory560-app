@@ -381,6 +381,233 @@ def probar_contrato_panel() -> None:
             "si falta la variante, la API responde igual en vez de dar error 500")
 
 
+# =====================================================================
+# 9. ESCAPE DE HTML EN EL PANEL  (Hallazgo 1)
+# =====================================================================
+
+# Campos que llegan del servidor y los teclea una persona. Si alguno se
+# interpola en el panel SIN pasar por esc(), un usuario puede inyectar codigo
+# que se ejecuta en el navegador del administrador.
+CAMPOS_PELIGROSOS = ["x.nombre", "x.telefono", "x.placa", "x.taller", "x.variante",
+                     "r.nombre", "r.descripcion", "d.usuario.nombre", "d.usuario.telefono",
+                     "v.placa", "v.nombre", "t.nombre", "cat"]
+
+
+def probar_escape_panel() -> None:
+    print("\n[9] Escape de HTML en el panel")
+    from pathlib import Path
+    import re
+
+    html = Path("panel.html").read_text(encoding="utf-8")
+
+    revisar("function esc(" in html, "el panel define la funcion esc()")
+    revisar("&amp;" in html and "&lt;" in html, "esc() mapea los caracteres peligrosos")
+
+    # Ninguna interpolacion debe llevar un campo peligroso "desnudo".
+    sin_escapar = []
+    for linea in html.split("\n"):
+        if "base64" in linea:
+            continue
+        for trozo in re.findall(r"\$\{([^{}]*)\}", linea):
+            for campo in CAMPOS_PELIGROSOS:
+                # El campo aparece y no esta dentro de una llamada a esc(...)
+                if re.search(r"(?<![\w.])" + re.escape(campo) + r"(?![\w])", trozo) \
+                        and "esc(" not in trozo:
+                    sin_escapar.append(trozo.strip()[:60])
+    revisar(not sin_escapar,
+            f"ninguna interpolacion deja un campo sin escapar (sueltos: {sin_escapar[:3] or 'ninguno'})")
+
+    # El boton de precio de mercado ya no mete datos dentro de un onclick.
+    revisar("onclick=\"verMercado('" not in html,
+            "el boton de precio ya no interpola datos dentro del onclick")
+    revisar("verMercadoDe(this)" in html,
+            "ese boton pasa los datos por atributos data-*")
+
+
+# =====================================================================
+# 10. LIMITACION DE INTENTOS  (Hallazgo 3)
+# =====================================================================
+
+def probar_limite_intentos() -> None:
+    print("\n[10] Limitacion de intentos")
+    import auth
+
+    clave = "prueba:limite:unica"
+    auth.limpiar_intentos(clave)
+
+    revisar(auth.intento_permitido(clave), "el primer intento se permite")
+    for _ in range(auth.LIMITE_INTENTOS):
+        auth.registrar_fallo(clave)
+    revisar(not auth.intento_permitido(clave),
+            f"tras {auth.LIMITE_INTENTOS} fallos se bloquea")
+    revisar(auth.segundos_para_reintentar(clave) > 0, "informa cuanto falta para reintentar")
+
+    auth.limpiar_intentos(clave)
+    revisar(auth.intento_permitido(clave), "un acierto limpia el contador")
+
+    # La ventana es deslizante: un fallo antiguo no debe contar.
+    import time as _t
+    auth._fallos[clave] = [_t.time() - auth.VENTANA_SEGUNDOS - 10] * auth.LIMITE_INTENTOS
+    revisar(auth.intento_permitido(clave), "los fallos vencidos dejan de contar")
+    auth.limpiar_intentos(clave)
+
+    # El limitador no puede crecer sin fin (seria un agotamiento de memoria).
+    auth._fallos.clear()
+    for i in range(auth._MAX_CLAVES + 50):
+        auth._fallos[f"basura:{i}"] = [_t.time() - auth.VENTANA_SEGUNDOS - 1]
+    auth.intento_permitido("dispara-la-poda")
+    revisar(len(auth._fallos) < auth._MAX_CLAVES,
+            "el contador poda los registros vencidos y no crece sin limite")
+    auth._fallos.clear()
+
+    # Y de extremo a extremo: el login devuelve 429 tras agotar los intentos.
+    cliente = TestClient(main.app)
+    db.buscar_usuario_por_telefono_normalizado = lambda t: None
+    codigos = [cliente.post("/api/login",
+                            json={"usuario": "0991112233", "contrasena": "malaclave1"}).status_code
+               for _ in range(auth.LIMITE_INTENTOS + 2)]
+    revisar(codigos[0] == 401, "un intento fallido responde 401")
+    revisar(429 in codigos, f"tras varios fallos responde 429 (codigos: {codigos})")
+    auth._fallos.clear()
+
+
+# =====================================================================
+# 11. CICLO DE SESION Y CAMBIO DE CONTRASENA  (Hallazgo 7)
+# =====================================================================
+
+def probar_sesion() -> None:
+    print("\n[11] Ciclo de sesion")
+    import auth
+    import web
+
+    auth._fallos.clear()
+    hash_inicial = auth.hash_password("ClaveBuena1")
+    persona = {"id": 1, "nombre": "Prueba", "telefono": "0991112233",
+               "estado": "aprobado", "rol": "usuario", "clave_hash": hash_inicial}
+
+    db.buscar_usuario_por_telefono_normalizado = lambda t: dict(persona)
+    db.obtener_usuario = lambda uid: dict(persona)
+
+    # base_url con https: la cookie de sesion lleva el atributo Secure, y sobre
+    # http el cliente no la envia de vuelta. Sin esto, las comprobaciones de
+    # abajo pasarian por el motivo equivocado: por falta de cookie, no por la
+    # marca de credencial.
+    cliente = TestClient(main.app, base_url="https://pruebas.local")
+    r = cliente.post("/api/login", json={"usuario": "0991112233", "contrasena": "ClaveBuena1"})
+    revisar(r.status_code == 200, "el login con la contrasena correcta entra")
+    revisar("sesion" in cliente.cookies, "se emite la cookie de sesion")
+
+    galleta = cliente.cookies.get("sesion")
+    revisar(len(str(galleta).split(".")) == 4,
+            "la cookie lleva usuario, expiracion, marca y firma")
+
+    revisar(cliente.get("/api/sesion").status_code == 200, "la sesion recien creada es valida")
+
+    # Se cambia la contrasena por fuera (como haria otro dispositivo) y la
+    # cookie vieja debe dejar de servir.
+    persona["clave_hash"] = auth.hash_password("OtraClave2")
+    revisar(cliente.get("/api/sesion").status_code == 401,
+            "al cambiar la contrasena, la sesion anterior queda invalidada")
+
+    # Una cookie con la firma alterada no debe pasar.
+    persona["clave_hash"] = hash_inicial
+    cliente.cookies.set("sesion", str(galleta)[:-4] + "0000")
+    revisar(cliente.get("/api/sesion").status_code == 401, "una firma alterada se rechaza")
+
+    # Y el formato viejo de tres partes tampoco.
+    cliente.cookies.set("sesion", "1.99999999999.firmafalsa")
+    revisar(cliente.get("/api/sesion").status_code == 401,
+            "una cookie del formato anterior ya no vale")
+    auth._fallos.clear()
+
+
+# =====================================================================
+# 12. CABECERAS DE SEGURIDAD  (Hallazgo 5)
+# =====================================================================
+
+def probar_cabeceras() -> None:
+    print("\n[12] Cabeceras de seguridad")
+    cliente = TestClient(main.app)
+    cab = cliente.get("/").headers
+
+    esperadas = {
+        "x-frame-options": "DENY",
+        "x-content-type-options": "nosniff",
+        "referrer-policy": "no-referrer",
+    }
+    for nombre, valor in esperadas.items():
+        revisar(cab.get(nombre) == valor, f"{nombre}: {valor}")
+    revisar("max-age=" in cab.get("strict-transport-security", ""),
+            "strict-transport-security con max-age")
+
+    csp = cab.get("content-security-policy", "")
+    revisar("default-src 'self'" in csp, "la CSP restringe el origen por defecto")
+    revisar("frame-ancestors 'none'" in csp, "la CSP impide que el panel se incruste")
+    revisar("object-src 'none'" in csp, "la CSP bloquea los objetos incrustados")
+    revisar("cdnjs.cloudflare.com" in csp,
+            "la CSP permite el CDN de Chart.js, que el panel necesita de verdad")
+
+
+# =====================================================================
+# 13. CAMBIO DE CONTRASENA OBLIGATORIO  (Hallazgo 2)
+# =====================================================================
+
+def probar_clave_obligatoria() -> None:
+    print("\n[13] Cambio de contrasena obligatorio")
+    import auth
+    import web
+
+    auth._fallos.clear()
+
+    # Un usuario heredado: sin clave_hash, su contrasena sigue siendo el telefono.
+    heredado = {"id": 5, "nombre": "Heredado", "telefono": "0987654321",
+                "estado": "aprobado", "rol": "usuario", "clave_hash": None}
+    db.buscar_usuario_por_telefono_normalizado = lambda t: dict(heredado)
+    db.obtener_usuario = lambda uid: dict(heredado)
+
+    cliente = TestClient(main.app, base_url="https://pruebas.local")
+    r = cliente.post("/api/login", json={"usuario": "0987654321", "contrasena": "0987654321"})
+    revisar(r.status_code == 200, "el usuario heredado todavia puede entrar (no se le deja fuera)")
+    revisar(r.json().get("debe_cambiar") is True, "el login avisa que debe cambiar la contrasena")
+
+    r = cliente.get("/api/sesion")
+    revisar(r.status_code == 200 and r.json().get("debe_cambiar") is True,
+            "la sesion informa del cambio pendiente")
+
+    # Pero su sesion no sirve para nada mas.
+    for ruta in ["/api/mis-datos", "/api/mantenimientos", "/api/tipos"]:
+        revisar(cliente.get(ruta).status_code == 401,
+                f"{ruta} queda bloqueada hasta que defina su contrasena")
+
+    # Al cambiarla, se desbloquea.
+    guardado = {}
+    db.actualizar_clave_hash = lambda uid, h: guardado.update({"hash": h})
+    r = cliente.post("/api/cambiar-clave", json={"actual": "0987654321",
+                                                 "nueva": "ClaveNueva9", "repetir": "ClaveNueva9"})
+    revisar(r.status_code == 200, "puede cambiar la contrasena usando el telefono como actual")
+    revisar(guardado.get("hash", "").startswith("pbkdf2_sha256$"),
+            "la contrasena nueva se guarda cifrada, nunca en claro")
+
+    heredado["clave_hash"] = guardado["hash"]
+    revisar(cliente.get("/api/mis-datos").status_code != 401,
+            "con la contrasena ya definida, el panel se desbloquea")
+
+    # Una contrasena debil debe rechazarse.
+    heredado["clave_hash"] = None
+    cliente2 = TestClient(main.app, base_url="https://pruebas.local")
+    cliente2.post("/api/login", json={"usuario": "0987654321", "contrasena": "0987654321"})
+    r = cliente2.post("/api/cambiar-clave", json={"actual": "0987654321",
+                                                  "nueva": "12345678", "repetir": "12345678"})
+    revisar(r.status_code == 400, "una contrasena sin letras se rechaza")
+
+    # Y las cuentas nuevas ya no nacen con la contrasena en claro.
+    import inspect
+    fuente = inspect.getsource(db.crear_usuario)
+    revisar('"clave": telefono' not in fuente,
+            "crear_usuario ya no guarda el telefono como contrasena en claro")
+    auth._fallos.clear()
+
+
 if __name__ == "__main__":
     probar_rutas()
     probar_calculo()
@@ -390,6 +617,11 @@ if __name__ == "__main__":
     probar_numeros()
     probar_validacion_km()
     probar_contrato_panel()
+    probar_escape_panel()
+    probar_limite_intentos()
+    probar_sesion()
+    probar_cabeceras()
+    probar_clave_obligatoria()
     print("\n" + "=" * 62)
     if _fallos:
         print(f"{len(_fallos)} PRUEBA(S) FALLARON:")
