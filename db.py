@@ -504,6 +504,37 @@ def limpiar_estado(telegram_id: int) -> None:
     supabase.table("estado_conversacion").delete().eq("telegram_id", telegram_id).execute()
 
 
+# ==================== RESPALDO ====================
+
+# Tablas que se incluyen en el respaldo. Están todas: los catálogos ocupan
+# poco y tenerlos permite reconstruir la base entera desde el archivo.
+TABLAS_RESPALDO = ["usuarios", "vehiculos", "variantes", "tipos_mantenimiento",
+                   "intervalos", "mantenimientos", "lecturas_km", "alertas"]
+
+
+def exportar_todo() -> dict:
+    """
+    Devuelve el contenido de todas las tablas, listo para serializar a JSON.
+
+    La columna con la contraseña heredada en claro se omite a propósito: un
+    respaldo que la incluyera esparciría esas credenciales a cada copia.
+    """
+    volcado: dict = {"generado_en": _ahora_iso(), "tablas": {}}
+    for tabla in TABLAS_RESPALDO:
+        try:
+            filas = supabase.table(tabla).select("*").execute().data or []
+        except Exception as e:
+            volcado["tablas"][tabla] = {"error": str(e)[:200]}
+            continue
+        if tabla == "usuarios":
+            filas = [{k: v for k, v in f.items()
+                      if k not in ("clave", "reset_codigo")} for f in filas]
+        volcado["tablas"][tabla] = filas
+    volcado["resumen"] = {t: (len(f) if isinstance(f, list) else "error")
+                          for t, f in volcado["tablas"].items()}
+    return volcado
+
+
 # ==================== Ayudas de fecha ====================
 
 # Ecuador está en UTC-5 (todo el año, sin horario de verano).

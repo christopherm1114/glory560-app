@@ -1,0 +1,48 @@
+# Ejecuta la batería de pruebas en cada cambio.
+#
+# Por qué existe: Render despliega automáticamente cada push a main. Sin esto,
+# un error de sintaxis llegaba a producción y el bot dejaba de responder hasta
+# que alguien lo notara. Ahora GitHub ejecuta pruebas.py antes, y si algo falla
+# el commit queda marcado en rojo.
+#
+# Las pruebas no tocan Supabase ni Telegram: usan credenciales de mentira y
+# sustituyen las funciones que salen a la red, así que no hacen falta secretos.
+
+name: Pruebas
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  # Permite lanzarlo a mano desde la pestaña Actions de GitHub.
+  workflow_dispatch:
+
+jobs:
+  pruebas:
+    name: Batería de pruebas
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Descargar el repositorio
+        uses: actions/checkout@v4
+
+      - name: Preparar Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Instalar dependencias
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Comprobar que todos los archivos compilan
+        run: python -m compileall -q auth.py config.py db.py handlers.py main.py mantenimiento.py tareas.py telegram.py web.py pruebas.py
+
+      - name: Ejecutar pruebas.py
+        env:
+          PYTHONIOENCODING: utf-8
+        run: python pruebas.py

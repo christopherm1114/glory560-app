@@ -608,6 +608,110 @@ def probar_clave_obligatoria() -> None:
     auth._fallos.clear()
 
 
+# =====================================================================
+# 14. IMAGENES SERVIDAS APARTE
+# =====================================================================
+
+IMAGENES = ["fondo-hero.webp", "fondo-login.jpg", "logo.jpg",
+            "auto-hero.webp", "logo-hero.webp"]
+
+
+def probar_estaticos() -> None:
+    print("\n[14] Imagenes servidas aparte")
+    from pathlib import Path
+
+    cliente = TestClient(main.app)
+    html = Path("panel.html").read_text(encoding="utf-8")
+
+    revisar("base64," not in html,
+            "panel.html ya no lleva imagenes incrustadas en base64")
+    revisar(len(html) < 80_000,
+            f"panel.html pesa poco ({len(html):,} caracteres; antes 397.011)")
+
+    for img in IMAGENES:
+        r = cliente.get(f"/estaticos/{img}")
+        revisar(r.status_code == 200, f"/estaticos/{img} se sirve")
+        # El tipo correcto es imprescindible: con la cabecera nosniff que
+        # declaramos, un tipo equivocado hace que el navegador se niegue a
+        # dibujar la imagen. Los .webp son el caso que falla si nadie los
+        # registra, porque Windows no los trae de fabrica.
+        revisar(r.headers.get("content-type", "").startswith("image/"),
+                f"  con tipo de imagen correcto ({r.headers.get('content-type')})")
+
+    r = cliente.get(f"/estaticos/{IMAGENES[0]}")
+    revisar("max-age=" in r.headers.get("cache-control", ""),
+            "las imagenes se cachean en el navegador")
+
+    revisar(cliente.get("/estaticos/no-existe.png").status_code == 404,
+            "un archivo inexistente devuelve 404")
+
+    # Toda imagen referenciada por el panel debe existir de verdad.
+    import re
+    referidas = set(re.findall(r"/estaticos/([A-Za-z0-9._-]+)", html))
+    faltantes = [i for i in referidas if not Path("estaticos", i).exists()]
+    revisar(not faltantes, f"todas las imagenes referidas existen (faltan: {faltantes or 'ninguna'})")
+
+
+# =====================================================================
+# 15. RESPALDO Y AVISOS AL ADMINISTRADOR
+# =====================================================================
+
+def probar_respaldo() -> None:
+    print("\n[15] Respaldo y avisos")
+    cliente = TestClient(main.app)
+
+    revisar(cliente.get("/tasks/respaldo").status_code == 403,
+            "la ruta de respaldo rechaza una llamada sin token")
+    revisar(cliente.get("/tasks/respaldo?token=malo").status_code == 403,
+            "rechaza un token incorrecto")
+
+    corridas = []
+    main.tareas.ejecutar_respaldo = lambda: corridas.append(1)
+    r = cliente.get("/tasks/respaldo?token=secreto-tareas")
+    revisar(r.status_code == 200 and r.text == "ok" and len(corridas) == 1,
+            "con el token correcto responde corto y trabaja en segundo plano")
+
+    # El volcado no debe llevarse las credenciales. Se sustituye el cliente de
+    # base de datos y se devuelve como estaba al terminar: dejarlo cambiado
+    # convertiria esta prueba en una trampa para las que se agreguen despues.
+    supabase_real = db.supabase
+    db.supabase = type("FalsoSupabase", (), {
+        "table": lambda self, t: type("C", (), {
+            "select": lambda self, c: type("E", (), {
+                "execute": lambda self: type("R", (), {"data": [
+                    {"id": 1, "nombre": "Ana", "telefono": "099", "clave": "099",
+                     "clave_hash": "pbkdf2$x", "reset_codigo": "123456"}]})()
+            })()
+        })()
+    })()
+    volcado = db.exportar_todo()
+    usuarios = volcado["tablas"]["usuarios"]
+    revisar("clave" not in usuarios[0], "el respaldo omite la contrasena heredada")
+    revisar("reset_codigo" not in usuarios[0], "el respaldo omite el codigo de recuperacion")
+    revisar("nombre" in usuarios[0] and "telefono" in usuarios[0],
+            "el respaldo si conserva los datos que hacen falta para restaurar")
+    revisar("generado_en" in volcado and "resumen" in volcado,
+            "el respaldo lleva fecha y un resumen por tabla")
+    db.supabase = supabase_real
+
+    # Los avisos no deben repetirse en bucle ni propagar errores.
+    enviados = []
+    envio_real = tg.enviar_mensaje
+    tg.enviar_mensaje = lambda chat, texto, teclado=None: enviados.append(texto)
+    try:
+        tg._ULTIMOS_AVISOS.clear()
+        tg.avisar_al_admin("Prueba de aviso", "detalle")
+        tg.avisar_al_admin("Prueba de aviso", "detalle")
+        revisar(len(enviados) == 1, "un aviso repetido no se reenvia una y otra vez")
+
+        tg.enviar_mensaje = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("sin red"))
+        tg._ULTIMOS_AVISOS.clear()
+        tg.avisar_al_admin("Otro aviso")
+        revisar(True, "si el aviso falla, no revienta encima del error original")
+    finally:
+        tg.enviar_mensaje = envio_real
+
+
 if __name__ == "__main__":
     probar_rutas()
     probar_calculo()
@@ -622,6 +726,8 @@ if __name__ == "__main__":
     probar_sesion()
     probar_cabeceras()
     probar_clave_obligatoria()
+    probar_estaticos()
+    probar_respaldo()
     print("\n" + "=" * 62)
     if _fallos:
         print(f"{len(_fallos)} PRUEBA(S) FALLARON:")

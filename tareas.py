@@ -47,6 +47,7 @@ def ejecutar_revision() -> None:
     except Exception as e:
         print(f"[tareas] error al revisar vencimientos: {e}")
         traceback.print_exc()
+        tg.avisar_al_admin("La tarea de recordatorios falló", traceback.format_exc())
     finally:
         _candado.release()
 
@@ -102,6 +103,49 @@ def revisar_vencimientos() -> int:
             print(f"[tareas] No se pudo avisar al usuario {usuario.get('id')}: {e}")
 
     return enviados
+
+
+# =====================================================================
+# RESPALDO
+# =====================================================================
+
+_candado_respaldo = threading.Lock()
+
+
+def ejecutar_respaldo() -> None:
+    """
+    Exporta la base y se la envía al administrador por Telegram.
+
+    El respaldo acaba fuera del servidor, en un sitio al que el administrador
+    siempre tiene acceso y que no depende del plan gratuito de la base de
+    datos. Antes no existía ninguna copia: un borrado accidental en el editor
+    SQL se llevaba por delante todo el historial.
+    """
+    import json
+    from config import ADMIN_TELEGRAM_ID
+
+    if not _candado_respaldo.acquire(blocking=False):
+        print("[respaldo] ya hay uno en curso; se ignora esta llamada")
+        return
+    try:
+        if not ADMIN_TELEGRAM_ID:
+            print("[respaldo] falta ADMIN_TELEGRAM_ID; no hay a quien enviarlo")
+            return
+        volcado = db.exportar_todo()
+        contenido = json.dumps(volcado, ensure_ascii=False, indent=1).encode("utf-8")
+        nombre = f"respaldo-glory560-{db._hoy()}.json"
+        resumen = " · ".join(f"{t}: {n}" for t, n in volcado["resumen"].items())
+        tg.enviar_documento(
+            ADMIN_TELEGRAM_ID, nombre, contenido,
+            f"💾 <b>Respaldo {db._hoy()}</b>\n{resumen}\n"
+            f"{len(contenido) / 1024:.0f} KB")
+        print(f"[respaldo] enviado: {nombre} ({len(contenido)} bytes)")
+    except Exception as e:
+        print(f"[respaldo] error: {e}")
+        traceback.print_exc()
+        tg.avisar_al_admin("El respaldo automático falló", traceback.format_exc())
+    finally:
+        _candado_respaldo.release()
 
 
 if __name__ == "__main__":
