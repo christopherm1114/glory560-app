@@ -80,7 +80,11 @@ def crear_usuario(telegram_id: int, telefono: str, nombre: str) -> dict:
         "nombre": nombre,
         "estado": "pendiente",
         "rol": "usuario",
-        "clave": telefono,   # contraseña inicial para la web = el teléfono
+        # Ya NO se guarda ninguna contraseña en claro. Antes se rellenaba la
+        # columna heredada con el número de teléfono, convirtiendo un dato que
+        # se comparte con normalidad en la llave de la cuenta, y además sin
+        # cifrar. Ahora el usuario define su contraseña en su primer ingreso
+        # al panel; hasta entonces su sesión no sirve para nada más.
     }).execute()
     return resp.data[0]
 

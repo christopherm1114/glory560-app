@@ -253,6 +253,9 @@ async function iniciar(){
   $('#login').classList.add('oculto');
   $('#app').classList.remove('oculto');
   $('#h-rol').textContent = SESION.rol === 'admin' ? '🛠️ Administrador' : '👤 Usuario';
+  // Mientras la cuenta siga usando la credencial heredada (el telefono), el
+  // servidor rechaza el resto de la API: no tiene sentido pintar las vinetas.
+  if(SESION.debe_cambiar){ vistaClaveObligatoria(); iniciarInactividad(); return; }
   construirTabs();
   abrirTab(TABS[0].id);
   iniciarInactividad();
@@ -395,11 +398,42 @@ function vistaPerfil(c, d){
     <div id="c-msg" class="muted oculto" style="margin-top:8px"></div>
   </div>`;
 }
-async function cambiarClave(){
+function vistaClaveObligatoria(){
+  $('#tabs').innerHTML = '';
+  $('#h-titulo').textContent = 'Define tu contraseña';
+  $('#h-sub').textContent = 'Paso obligatorio para entrar';
+  $('#cont').innerHTML = `
+    <div class="card" style="border-left:4px solid var(--warn)">
+      <h2>🔐 Antes de continuar, elige una contraseña</h2>
+      <p class="muted" style="margin-top:6px">
+        Tu cuenta todavía entra con tu número de teléfono como contraseña. Cualquiera
+        que conozca tu número podría acceder a tus datos, así que vamos a cambiarlo ahora.
+        Hasta entonces, el resto del panel permanece bloqueado.
+      </p>
+      <div style="margin-top:14px;max-width:380px">
+        <div class="field">Contraseña actual (tu número de teléfono)</div>
+        <input id="c-actual" type="password" placeholder="09XXXXXXXX">
+        <div class="field" style="margin-top:10px">Contraseña nueva</div>
+        <input id="c-nueva" type="password" placeholder="Mínimo 8 caracteres, con letras y números">
+        <div class="field" style="margin-top:10px">Repite la contraseña nueva</div>
+        <input id="c-rep" type="password">
+        <button class="btn" style="margin-top:14px" onclick="cambiarClave(true)">Guardar y entrar</button>
+        <div id="c-msg" class="muted" style="margin-top:10px"></div>
+      </div>
+    </div>`;
+}
+
+async function cambiarClave(obligatorio){
   const actual=$('#c-actual').value, nueva=$('#c-nueva').value, repetir=$('#c-rep').value;
   const r=await fetch('/api/cambiar-clave',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({actual,nueva,repetir})});
   const m=$('#c-msg'); m.classList.remove('oculto');
-  if(r.status===200){ m.style.color='var(--good)'; m.textContent='✓ Contraseña actualizada.'; $('#c-actual').value='';$('#c-nueva').value='';$('#c-rep').value=''; }
+  if(r.status===200){
+    m.style.color='var(--good)'; m.textContent='✓ Contraseña actualizada.';
+    $('#c-actual').value='';$('#c-nueva').value='';$('#c-rep').value='';
+    // Si era el cambio obligatorio, se recarga para entrar ya con la sesion
+    // completa: el servidor acaba de levantar la restriccion.
+    if(obligatorio){ setTimeout(()=>location.reload(), 900); }
+  }
   else { const d=await r.json(); m.style.color='var(--critical)'; m.textContent=mensajeError(d.error); }
 }
 async function guardarPerfil(){

@@ -548,6 +548,66 @@ def probar_cabeceras() -> None:
             "la CSP permite el CDN de Chart.js, que el panel necesita de verdad")
 
 
+# =====================================================================
+# 13. CAMBIO DE CONTRASENA OBLIGATORIO  (Hallazgo 2)
+# =====================================================================
+
+def probar_clave_obligatoria() -> None:
+    print("\n[13] Cambio de contrasena obligatorio")
+    import auth
+    import web
+
+    auth._fallos.clear()
+
+    # Un usuario heredado: sin clave_hash, su contrasena sigue siendo el telefono.
+    heredado = {"id": 5, "nombre": "Heredado", "telefono": "0987654321",
+                "estado": "aprobado", "rol": "usuario", "clave_hash": None}
+    db.buscar_usuario_por_telefono_normalizado = lambda t: dict(heredado)
+    db.obtener_usuario = lambda uid: dict(heredado)
+
+    cliente = TestClient(main.app, base_url="https://pruebas.local")
+    r = cliente.post("/api/login", json={"usuario": "0987654321", "contrasena": "0987654321"})
+    revisar(r.status_code == 200, "el usuario heredado todavia puede entrar (no se le deja fuera)")
+    revisar(r.json().get("debe_cambiar") is True, "el login avisa que debe cambiar la contrasena")
+
+    r = cliente.get("/api/sesion")
+    revisar(r.status_code == 200 and r.json().get("debe_cambiar") is True,
+            "la sesion informa del cambio pendiente")
+
+    # Pero su sesion no sirve para nada mas.
+    for ruta in ["/api/mis-datos", "/api/mantenimientos", "/api/tipos"]:
+        revisar(cliente.get(ruta).status_code == 401,
+                f"{ruta} queda bloqueada hasta que defina su contrasena")
+
+    # Al cambiarla, se desbloquea.
+    guardado = {}
+    db.actualizar_clave_hash = lambda uid, h: guardado.update({"hash": h})
+    r = cliente.post("/api/cambiar-clave", json={"actual": "0987654321",
+                                                 "nueva": "ClaveNueva9", "repetir": "ClaveNueva9"})
+    revisar(r.status_code == 200, "puede cambiar la contrasena usando el telefono como actual")
+    revisar(guardado.get("hash", "").startswith("pbkdf2_sha256$"),
+            "la contrasena nueva se guarda cifrada, nunca en claro")
+
+    heredado["clave_hash"] = guardado["hash"]
+    revisar(cliente.get("/api/mis-datos").status_code != 401,
+            "con la contrasena ya definida, el panel se desbloquea")
+
+    # Una contrasena debil debe rechazarse.
+    heredado["clave_hash"] = None
+    cliente2 = TestClient(main.app, base_url="https://pruebas.local")
+    cliente2.post("/api/login", json={"usuario": "0987654321", "contrasena": "0987654321"})
+    r = cliente2.post("/api/cambiar-clave", json={"actual": "0987654321",
+                                                  "nueva": "12345678", "repetir": "12345678"})
+    revisar(r.status_code == 400, "una contrasena sin letras se rechaza")
+
+    # Y las cuentas nuevas ya no nacen con la contrasena en claro.
+    import inspect
+    fuente = inspect.getsource(db.crear_usuario)
+    revisar('"clave": telefono' not in fuente,
+            "crear_usuario ya no guarda el telefono como contrasena en claro")
+    auth._fallos.clear()
+
+
 if __name__ == "__main__":
     probar_rutas()
     probar_calculo()
@@ -561,6 +621,7 @@ if __name__ == "__main__":
     probar_limite_intentos()
     probar_sesion()
     probar_cabeceras()
+    probar_clave_obligatoria()
     print("\n" + "=" * 62)
     if _fallos:
         print(f"{len(_fallos)} PRUEBA(S) FALLARON:")

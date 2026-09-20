@@ -147,6 +147,14 @@ def verificar_credencial(persona: dict, contrasena: str) -> bool:
 
 # ---------- Login ----------
 
+def debe_cambiar_clave(persona: dict) -> bool:
+    """
+    True si la cuenta todavía no tiene contraseña propia y sigue entrando con
+    la credencial heredada (el teléfono). Su sesión solo sirve para cambiarla.
+    """
+    return not (persona or {}).get("clave_hash")
+
+
 def validar_login(usuario: str, contrasena: str) -> dict | None:
     """
     Comprueba las credenciales. Devuelve el usuario si son correctas y su

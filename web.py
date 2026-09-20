@@ -83,8 +83,16 @@ def _demasiados_intentos(*claves: str):
     return None
 
 
-def _usuario_actual(request: Request) -> dict | None:
-    """Devuelve el usuario de la sesión (según la cookie) o None."""
+def _usuario_actual(request: Request, exigir_clave_propia: bool = True) -> dict | None:
+    """
+    Devuelve el usuario de la sesión (según la cookie) o None.
+
+    Con exigir_clave_propia (lo normal), una cuenta que todavía entra con la
+    credencial heredada —el teléfono— se trata como no autenticada: su sesión
+    solo vale para /api/sesion y /api/cambiar-clave, que pasan False. Así el
+    cambio de contraseña es obligatorio en la práctica, sin dejar fuera a los
+    usuarios que ya existían.
+    """
     leido = auth.leer_cookie_sesion(request.cookies.get("sesion"))
     if not leido:
         return None
@@ -96,6 +104,8 @@ def _usuario_actual(request: Request) -> dict | None:
     # coincide y la sesión queda invalidada. Así, cambiar la contraseña
     # expulsa de verdad a quien estuviera dentro.
     if marca != auth.marca_credencial(u.get("clave_hash")):
+        return None
+    if exigir_clave_propia and auth.debe_cambiar_clave(u):
         return None
     return u
 
@@ -214,7 +224,9 @@ def api_login(request: Request, datos: dict = Body(...)):
     auth.limpiar_intentos(clave_ip)
     auth.limpiar_intentos(clave_cuenta)
     cookie = auth.crear_cookie_sesion(persona["id"], persona.get("clave_hash"))
-    resp = JSONResponse({"ok": True, "rol": persona.get("rol", "usuario"), "nombre": persona["nombre"]})
+    resp = JSONResponse({"ok": True, "rol": persona.get("rol", "usuario"),
+                         "nombre": persona["nombre"],
+                         "debe_cambiar": auth.debe_cambiar_clave(persona)})
     resp.set_cookie("sesion", cookie, httponly=True, secure=True, samesite="lax",
                     max_age=auth.MINUTOS_SESION * 60)
     return resp
@@ -231,7 +243,9 @@ def api_logout():
 
 @router.post("/api/cambiar-clave")
 def api_cambiar_clave(request: Request, datos: dict = Body(...)):
-    u = _usuario_actual(request)
+    # exigir_clave_propia=False: esta es justamente la ruta que el usuario
+    # necesita para salir del estado heredado.
+    u = _usuario_actual(request, exigir_clave_propia=False)
     if not u:
         return JSONResponse({"error": "no_autenticado"}, status_code=401)
     actual = datos.get("actual", "")
@@ -337,12 +351,16 @@ def api_recuperar_confirmar(request: Request, datos: dict = Body(...)):
 
 @router.get("/api/sesion")
 def api_sesion(request: Request):
-    u = _usuario_actual(request)
+    # Tambien con False: el panel necesita saber quien es para poder mostrarle
+    # la pantalla de cambio obligatorio.
+    u = _usuario_actual(request, exigir_clave_propia=False)
     if not u:
         return JSONResponse({"error": "no_autenticado"}, status_code=401)
     # Renovamos la cookie (sesión "deslizante"): mientras el usuario esté
     # activo, la app llama a esta ruta y la sesión se mantiene viva.
-    resp = JSONResponse({"nombre": u["nombre"], "rol": u.get("rol", "usuario"), "telefono": u["telefono"]})
+    resp = JSONResponse({"nombre": u["nombre"], "rol": u.get("rol", "usuario"),
+                         "telefono": u["telefono"],
+                         "debe_cambiar": auth.debe_cambiar_clave(u)})
     # La cookie renovada debe llevar la marca de la credencial VIGENTE; si se
     # emitiera sin ella, la comprobacion de _usuario_actual fallaria en la
     # siguiente peticion y el usuario quedaria fuera cada pocos segundos.
