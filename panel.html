@@ -141,6 +141,20 @@
 .lg-input input::placeholder { color:#5f6b76; }
 .lg-input .icon { color:#7c8792; font-size:15px; }
 .lg-cc { display:flex; align-items:center; gap:6px; color:#cfd6dd; font-size:14px; border-right:1px solid #333a42; padding-right:10px; white-space:nowrap; }
+/* El selector de pais se integra dentro del recuadro del campo: se le quita
+   la apariencia nativa para que no parezca una caja pegada a otra caja. */
+select.lg-cc { appearance:none; -webkit-appearance:none; background:transparent; border:none;
+  border-right:1px solid #333a42; color:#cfd6dd; font-size:14px; font-family:inherit;
+  padding:13px 22px 13px 0; margin-right:2px; cursor:pointer; outline:none;
+  background-image:linear-gradient(45deg,transparent 50%,#7c8792 50%),linear-gradient(135deg,#7c8792 50%,transparent 50%);
+  background-position:calc(100% - 12px) calc(50% + 1px),calc(100% - 7px) calc(50% + 1px);
+  background-size:5px 5px,5px 5px; background-repeat:no-repeat; }
+select.lg-cc option { background:#1c1f24; color:#eef2f6; }
+select.lg-cc:focus { color:#eef2f6; }
+/* Aviso bajo el campo con el numero que se enviara de verdad. Que el usuario
+   VEA la conversion evita la duda de "y esto con que formato entra". */
+.lg-hint { min-height:16px; margin-top:6px; font-size:12px; color:#7c8792; }
+.lg-hint b { color:#9fb7cc; font-weight:600; letter-spacing:.3px; }
 .lg-btn { width:100%; margin-top:22px; padding:14px; border:none; border-radius:10px; cursor:pointer;
   font-size:16px; font-weight:700; color:#1b2026;
   background:linear-gradient(180deg,#e9edf1,#adb7c2 55%,#828d98);
@@ -164,9 +178,11 @@
 
       <div class="lg-label">Número de teléfono</div>
       <div class="lg-input">
-        <span class="lg-cc">🇪🇨 +593</span>
-        <input id="in-usuario" inputmode="tel" placeholder="Ej. 0999123456">
+        <select id="in-pais" class="lg-cc" onchange="alCambiarPais('in')"></select>
+        <input id="in-usuario" inputmode="tel" placeholder="Ej. 0990287112"
+               oninput="pintarPrevio('in')" onkeydown="if(event.key==='Enter')hacerLogin()">
       </div>
+      <div id="in-hint" class="lg-hint"></div>
 
       <div class="lg-label">Contraseña</div>
       <div class="lg-input">
@@ -196,7 +212,11 @@
       <div id="rec-paso1">
         <div class="lg-subtitle">Escribe tu teléfono y te enviaremos un código por Telegram.</div>
         <div class="lg-label">Número de teléfono</div>
-        <div class="lg-input"><span class="lg-cc">🇪🇨 +593</span><input id="rec-tel" inputmode="tel" placeholder="Ej. 0999123456"></div>
+        <div class="lg-input">
+          <select id="rec-pais" class="lg-cc" onchange="alCambiarPais('rec')"></select>
+          <input id="rec-tel" inputmode="tel" placeholder="Ej. 0990287112" oninput="pintarPrevio('rec')">
+        </div>
+        <div id="rec-hint" class="lg-hint"></div>
         <button class="lg-btn" onclick="pedirCodigo()">Enviarme el código</button>
       </div>
       <!-- Paso 2 -->
@@ -261,6 +281,7 @@ async function iniciar(){
   iniciarInactividad();
 }
 function mostrarLogin(){
+  llenarPaises('in'); llenarPaises('rec');
   $('#app').classList.add('oculto'); $('#recuperar').classList.add('oculto'); $('#login').classList.remove('oculto');
   // Si venimos de un cierre por inactividad, avisamos.
   if(new URLSearchParams(location.search).get('idle')==='1'){
@@ -298,7 +319,7 @@ function verRecuperar(){
 function verLogin(){ $('#recuperar').classList.add('oculto'); $('#login').classList.remove('oculto'); }
 
 async function pedirCodigo(){
-  const telefono = $('#rec-tel').value.trim();
+  const telefono = aInternacional(paisElegido('rec'), $('#rec-tel').value);
   if(!telefono){ return; }
   await fetch('/api/recuperar/solicitar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({telefono})});
   // Siempre pasamos al paso 2 (no revelamos si el número existe).
@@ -308,7 +329,7 @@ async function pedirCodigo(){
   m.textContent='Si el número está registrado, recibirás un código por Telegram.';
 }
 async function confirmarRecuperacion(){
-  const telefono=$('#rec-tel').value.trim(), codigo=$('#rec-codigo').value.trim();
+  const telefono=aInternacional(paisElegido('rec'), $('#rec-tel').value), codigo=$('#rec-codigo').value.trim();
   const nueva=$('#rec-nueva').value, repetir=$('#rec-rep').value;
   const r=await fetch('/api/recuperar/confirmar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({telefono,codigo,nueva,repetir})});
   const m=$('#rec-msg'); m.classList.remove('oculto');
@@ -321,8 +342,88 @@ function mensajeError(cod){
     actual_incorrecta:'La contraseña actual es incorrecta.'})[cod] || 'No se pudo completar.';
 }
 
+// =====================================================================
+// TELEFONO: codigo de pais + numero local
+// =====================================================================
+//
+// En la base los numeros se guardan como los entrega Telegram, en formato
+// internacional y sin el cero: 593990287112. Pero nadie escribe su numero
+// asi; en Ecuador se marca 0990287112. Antes el campo mostraba un '+593'
+// fijo que no hacia nada, y el usuario no sabia si debia incluir el cero.
+//
+// Ahora se elige el pais de una lista y la pagina arma el numero completo:
+// quita el cero inicial —el prefijo troncal, que solo se marca dentro del
+// pais— y antepone el codigo. El aviso bajo el campo muestra el resultado,
+// para que no haya que adivinar.
+
+const PAISES = [
+  { codigo:'593', nombre:'Ecuador',        bandera:'🇪🇨' },
+  { codigo:'57',  nombre:'Colombia',       bandera:'🇨🇴' },
+  { codigo:'51',  nombre:'Perú',           bandera:'🇵🇪' },
+  { codigo:'56',  nombre:'Chile',          bandera:'🇨🇱' },
+  { codigo:'54',  nombre:'Argentina',      bandera:'🇦🇷' },
+  { codigo:'52',  nombre:'México',         bandera:'🇲🇽' },
+  { codigo:'58',  nombre:'Venezuela',      bandera:'🇻🇪' },
+  { codigo:'591', nombre:'Bolivia',        bandera:'🇧🇴' },
+  { codigo:'595', nombre:'Paraguay',       bandera:'🇵🇾' },
+  { codigo:'598', nombre:'Uruguay',        bandera:'🇺🇾' },
+  { codigo:'55',  nombre:'Brasil',         bandera:'🇧🇷' },
+  { codigo:'507', nombre:'Panamá',         bandera:'🇵🇦' },
+  { codigo:'506', nombre:'Costa Rica',     bandera:'🇨🇷' },
+  { codigo:'34',  nombre:'España',         bandera:'🇪🇸' },
+  { codigo:'1',   nombre:'Estados Unidos', bandera:'🇺🇸' },
+];
+const PAIS_POR_DEFECTO = '593';
+
+function soloDigitos(v){ return String(v==null?'':v).replace(/\D+/g,''); }
+
+function aInternacional(codigo, texto){
+  let d = soloDigitos(texto);
+  if(!d) return '';
+  // Si ya viene con el codigo del pais delante, se respeta tal cual: asi
+  // quien copie y pegue '+593 99...' o '593990287112' tampoco se equivoca.
+  if(d.startsWith(codigo) && d.length > codigo.length) return d;
+  // El cero inicial es el prefijo troncal: se marca dentro del pais y no
+  // forma parte del numero internacional.
+  d = d.replace(/^0+/, '');
+  return d ? codigo + d : '';
+}
+
+function paisElegido(prefijo){
+  const sel = $('#' + prefijo + '-pais');
+  return (sel && sel.value) || PAIS_POR_DEFECTO;
+}
+
+function llenarPaises(prefijo){
+  const sel = $('#' + prefijo + '-pais');
+  if(!sel) return;
+  let recordado = PAIS_POR_DEFECTO;
+  try { recordado = localStorage.getItem('pais') || PAIS_POR_DEFECTO; } catch(e){}
+  sel.innerHTML = PAISES.map(p =>
+    `<option value="${p.codigo}" ${p.codigo===recordado?'selected':''}>${p.bandera} +${p.codigo}</option>`
+  ).join('');
+  sel.title = PAISES.map(p => `${p.bandera} ${p.nombre} +${p.codigo}`).join(' · ');
+}
+
+function alCambiarPais(prefijo){
+  try { localStorage.setItem('pais', paisElegido(prefijo)); } catch(e){}
+  pintarPrevio(prefijo);
+}
+
+function pintarPrevio(prefijo){
+  const campo = $('#' + (prefijo==='in' ? 'in-usuario' : 'rec-tel'));
+  const aviso = $('#' + prefijo + '-hint');
+  if(!campo || !aviso) return;
+  const crudo = campo.value.trim();
+  if(!crudo){ aviso.textContent=''; return; }
+  const completo = aInternacional(paisElegido(prefijo), crudo);
+  aviso.innerHTML = completo
+    ? `Se validará como <b>+${esc(completo)}</b>`
+    : '';
+}
+
 async function hacerLogin(){
-  const usuario = $('#in-usuario').value.trim();
+  const usuario = aInternacional(paisElegido('in'), $('#in-usuario').value);
   const contrasena = $('#in-clave').value.trim();
   const r = await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({usuario,contrasena})});
   if(r.status===200){ location.reload(); }

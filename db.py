@@ -165,16 +165,45 @@ def buscar_usuario_por_telefono_normalizado(telefono_digitos: str) -> dict | Non
 
     if _soporta_telefono_normalizado():
         resp = (supabase.table("usuarios").select("*")
-                .eq("telefono_normalizado", obj9).limit(1).execute())
-        return resp.data[0] if resp.data else None
+                .eq("telefono_normalizado", obj9).execute())
+        candidatos = resp.data or []
+    else:
+        # Camino antiguo, solo mientras la migración 002 no se haya ejecutado.
+        candidatos = []
+        for u in supabase.table("usuarios").select("*").execute().data or []:
+            guardado = "".join(c for c in str(u.get("telefono") or "") if c.isdigit())
+            if guardado and len(guardado) >= 9 and guardado[-9:] == obj9:
+                candidatos.append(u)
 
-    # Camino antiguo, solo mientras la migración 002 no se haya ejecutado.
-    for u in supabase.table("usuarios").select("*").execute().data or []:
+    return _desempatar_por_telefono(candidatos, telefono_digitos)
+
+
+def _desempatar_por_telefono(candidatos: list[dict], digitos: str) -> dict | None:
+    """
+    Elige a qué usuario corresponde el número entre varios con los mismos
+    nueve dígitos finales.
+
+    La comparación por los últimos nueve dígitos es tolerante a propósito:
+    permite entrar escribiendo '0990287112' aunque en la base esté guardado
+    como '593990287112'. Pero desde que el panel ofrece varios países, dos
+    personas de países distintos pueden compartir esos nueve dígitos —un
+    número ecuatoriano y uno peruano, por ejemplo— y entonces la tolerancia
+    se vuelve ambigüedad. Ante varios candidatos manda la coincidencia
+    exacta del número completo.
+    """
+    if not candidatos:
+        return None
+    if len(candidatos) == 1:
+        return candidatos[0]
+
+    for u in candidatos:
         guardado = "".join(c for c in str(u.get("telefono") or "") if c.isdigit())
-        if not guardado:
-            continue
-        if guardado == telefono_digitos or (len(guardado) >= 9 and guardado[-9:] == obj9):
+        if guardado == digitos:
             return u
+
+    print(f"[db] AVISO: {len(candidatos)} usuarios comparten los últimos 9 dígitos "
+          f"y ninguno coincide exactamente con el número recibido. No se "
+          f"autentica a ninguno para no entregar la cuenta equivocada.")
     return None
 
 

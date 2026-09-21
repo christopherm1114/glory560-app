@@ -712,6 +712,57 @@ def probar_respaldo() -> None:
         tg.enviar_mensaje = envio_real
 
 
+# =====================================================================
+# 16. TELEFONO CON CODIGO DE PAIS
+# =====================================================================
+
+def probar_telefono_pais() -> None:
+    print("\n[16] Telefono con codigo de pais")
+    from pathlib import Path
+    import auth
+
+    html = Path("panel.html").read_text(encoding="utf-8")
+
+    revisar('id="in-pais"' in html and 'id="rec-pais"' in html,
+            "el ingreso y la recuperacion tienen selector de pais")
+    revisar("const PAISES" in html and "aInternacional" in html,
+            "el panel arma el numero internacional antes de enviarlo")
+    revisar("'593'" in html and "Ecuador" in html, "Ecuador esta en la lista")
+    revisar('id="in-hint"' in html,
+            "el panel muestra el numero con el que se va a validar")
+    revisar("lg-cc" not in html.split("<script>")[0].split('id="in-usuario"')[0][-400:]
+            or 'select id="in-pais"' in html or '<select id="in-pais"' in html,
+            "el '+593' fijo se reemplazo por una lista desplegable")
+
+    # El backend sigue aceptando cualquier formato: es lo que permite que
+    # quien ya entraba con un formato distinto no quede fuera.
+    guardado = auth.normalizar_telefono("593990287112")
+    for entrada in ["0990287112", "990287112", "593990287112", "+593 99 028 7112"]:
+        d = auth.normalizar_telefono(entrada)
+        revisar(len(d) >= 9 and d[-9:] == guardado[-9:],
+                f"'{entrada}' sigue coincidiendo con el numero guardado")
+
+    # Desempate cuando dos paises comparten los ultimos nueve digitos.
+    ecuador = {"id": 1, "nombre": "Ecuatoriano", "telefono": "593990287112"}
+    peru = {"id": 2, "nombre": "Peruano", "telefono": "51990287112"}
+
+    elegido = db._desempatar_por_telefono([ecuador, peru], "593990287112")
+    revisar(elegido and elegido["id"] == 1,
+            "con dos paises que comparten los 9 digitos, gana la coincidencia exacta")
+
+    elegido = db._desempatar_por_telefono([ecuador, peru], "51990287112")
+    revisar(elegido and elegido["id"] == 2, "y funciona en el otro sentido")
+
+    elegido = db._desempatar_por_telefono([ecuador, peru], "57990287112")
+    revisar(elegido is None,
+            "si hay ambiguedad y ninguno coincide, no se autentica a nadie")
+
+    revisar(db._desempatar_por_telefono([ecuador], "0990287112") == ecuador,
+            "con un solo candidato se mantiene la tolerancia de formato")
+    revisar(db._desempatar_por_telefono([], "593990287112") is None,
+            "sin candidatos devuelve None")
+
+
 if __name__ == "__main__":
     probar_rutas()
     probar_calculo()
@@ -728,6 +779,7 @@ if __name__ == "__main__":
     probar_clave_obligatoria()
     probar_estaticos()
     probar_respaldo()
+    probar_telefono_pais()
     print("\n" + "=" * 62)
     if _fallos:
         print(f"{len(_fallos)} PRUEBA(S) FALLARON:")
