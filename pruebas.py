@@ -734,6 +734,20 @@ def probar_telefono_pais() -> None:
             or 'select id="in-pais"' in html or '<select id="in-pais"' in html,
             "el '+593' fijo se reemplazo por una lista desplegable")
 
+    # El selector no debe comerse el campo del numero. La regla base .lg-cc
+    # declara display:flex y un <select> en modo flex crece hasta ocupar todo
+    # el ancho: asi se desplego una vez una pantalla donde no se podia
+    # escribir el telefono. Esta comprobacion vigila que quede anulado.
+    import re
+    bloque = re.search(r"select\.lg-cc\s*\{[^}]*\}", html, re.S)
+    revisar(bloque is not None, "existe una regla propia para el selector")
+    if bloque:
+        css = bloque.group(0)
+        revisar("display:block" in css.replace(" ", ""),
+                "el selector anula el display:flex heredado")
+        revisar("flex:0 0 auto" in css or "flex:0 0auto" in css.replace("  ", " "),
+                "el selector no crece: el ancho sobrante es para el numero")
+
     # El backend sigue aceptando cualquier formato: es lo que permite que
     # quien ya entraba con un formato distinto no quede fuera.
     guardado = auth.normalizar_telefono("593990287112")

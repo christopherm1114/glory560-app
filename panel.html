@@ -137,13 +137,19 @@
 .lg-label { color:#8b97a3; font-size:11px; letter-spacing:.08em; text-transform:uppercase; margin:14px 0 6px; }
 .lg-input { display:flex; align-items:center; gap:8px; background:#1c1f24; border:1px solid #333a42; border-radius:10px; padding:0 12px; }
 .lg-input:focus-within { border-color:#c0392b; box-shadow:0 0 0 3px rgba(192,57,43,.15); }
-.lg-input input { flex:1; background:transparent; border:none; outline:none; color:#eef2f6; font-size:15px; padding:13px 0; }
+.lg-input input { flex:1 1 auto; min-width:0; background:transparent; border:none; outline:none; color:#eef2f6; font-size:15px; padding:13px 0; }
 .lg-input input::placeholder { color:#5f6b76; }
 .lg-input .icon { color:#7c8792; font-size:15px; }
 .lg-cc { display:flex; align-items:center; gap:6px; color:#cfd6dd; font-size:14px; border-right:1px solid #333a42; padding-right:10px; white-space:nowrap; }
 /* El selector de pais se integra dentro del recuadro del campo: se le quita
    la apariencia nativa para que no parezca una caja pegada a otra caja. */
-select.lg-cc { appearance:none; -webkit-appearance:none; background:transparent; border:none;
+select.lg-cc {
+  /* display:block anula el display:flex que hereda de .lg-cc. Un <select>
+     en modo flex se comporta de forma imprevisible y crecia hasta ocupar
+     todo el campo, dejando al numero sin espacio donde escribirse.
+     flex:0 0 auto lo fija: el ancho sobrante es para el telefono. */
+  display:block; flex:0 0 auto; width:auto; min-width:84px; max-width:110px;
+  appearance:none; -webkit-appearance:none; background-color:transparent; border:none;
   border-right:1px solid #333a42; color:#cfd6dd; font-size:14px; font-family:inherit;
   padding:13px 22px 13px 0; margin-right:2px; cursor:pointer; outline:none;
   background-image:linear-gradient(45deg,transparent 50%,#7c8792 50%),linear-gradient(135deg,#7c8792 50%,transparent 50%);
