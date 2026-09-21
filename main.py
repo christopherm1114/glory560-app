@@ -28,6 +28,7 @@ from fastapi.staticfiles import StaticFiles
 
 from config import TASKS_TOKEN, TELEGRAM_WEBHOOK_SECRET
 import handlers, tareas
+import telegram
 import web
 
 app = FastAPI(title="Control de Mantenimientos Glory 560")
@@ -95,6 +96,28 @@ else:
 app.include_router(web.router)
 
 
+def _token_de_tareas_valido(entregado: str, tarea: str) -> bool:
+    """
+    Comprueba el token de una tarea programada y, si no cuadra, avisa.
+
+    El aviso es la parte importante. Un cron mal configurado devolvia 403 y
+    se quedaba callado: los recordatorios dejaron de enviarse durante dias
+    sin que nadie lo notara, porque nada distinguia "no hay nada que avisar"
+    de "llevo dias rebotando". Ahora el administrador se entera al primer
+    rechazo, con el aviso limitado a uno cada media hora.
+    """
+    if not TASKS_TOKEN or entregado == TASKS_TOKEN:
+        return True
+    pista = f"{entregado[:4]}…{entregado[-3:]}" if len(entregado) > 8 else (entregado or "(vacío)")
+    telegram.avisar_al_admin(
+        f"Tarea '{tarea}' rechazada: token incorrecto",
+        f"Alguien llamó a /tasks/{tarea} con un token que no coincide.\n\n"
+        f"Token recibido: {pista}\n\n"
+        f"Si es tu cron, el valor de la URL no coincide con el TASKS_TOKEN "
+        f"configurado en Render. Mientras no cuadren, esta tarea no se ejecuta.")
+    return False
+
+
 @app.get("/")
 def salud():
     """Ruta simple para verificar que el servicio está funcionando."""
@@ -156,8 +179,7 @@ def revisar_vencimientos(
     # cron-job.org (plan gratis) corta las respuestas grandes y aborta la
     # petición a los ~30 segundos, marcando el job como fallido; tras varios
     # fallos lo desactiva solo. Por eso contestamos ya y enviamos después.
-    entregado = x_tasks_token or token
-    if TASKS_TOKEN and entregado != TASKS_TOKEN:
+    if not _token_de_tareas_valido(x_tasks_token or token, "revisar-vencimientos"):
         return PlainTextResponse("token invalido", status_code=403)
 
     tareas_fondo.add_task(tareas.ejecutar_revision)
@@ -178,8 +200,7 @@ def respaldo(
     TASKS_TOKEN y, como la otra tarea, responde de inmediato y trabaja después:
     el volcado puede tardar varios segundos y el cron corta a los 30.
     """
-    entregado = x_tasks_token or token
-    if TASKS_TOKEN and entregado != TASKS_TOKEN:
+    if not _token_de_tareas_valido(x_tasks_token or token, "respaldo"):
         return PlainTextResponse("token invalido", status_code=403)
 
     tareas_fondo.add_task(tareas.ejecutar_respaldo)

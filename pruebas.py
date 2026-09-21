@@ -38,6 +38,15 @@ import telegram as tg
 
 _fallos: list[str] = []
 
+# Desde que un token de tarea invalido avisa al administrador, CUALQUIER
+# prueba que use un token incorrecto intentaria salir a Telegram. Se anula el
+# aviso para toda la bateria y se restaura solo donde se quiere comprobarlo
+# (seccion 15). Se parchea avisar_al_admin y no enviar_mensaje, porque la
+# seccion 4 necesita probar enviar_mensaje de verdad contra un transporte
+# simulado.
+_avisar_real = tg.avisar_al_admin
+tg.avisar_al_admin = lambda *a, **k: None
+
 
 def revisar(condicion: bool, descripcion: str) -> None:
     """Registra el resultado de una comprobación sin cortar la ejecución."""
@@ -660,10 +669,44 @@ def probar_respaldo() -> None:
     print("\n[15] Respaldo y avisos")
     cliente = TestClient(main.app)
 
-    revisar(cliente.get("/tasks/respaldo").status_code == 403,
-            "la ruta de respaldo rechaza una llamada sin token")
-    revisar(cliente.get("/tasks/respaldo?token=malo").status_code == 403,
-            "rechaza un token incorrecto")
+    # El envio se sustituye ANTES de la primera llamada rechazada. Desde que
+    # un token invalido avisa al administrador, cualquier peticion con token
+    # incorrecto intentaria salir a Telegram de verdad; estas pruebas no
+    # tocan la red y eso tiene que seguir siendo cierto.
+    avisos = []
+    envio_real = tg.enviar_mensaje
+    tg.enviar_mensaje = lambda chat, texto, teclado=None: avisos.append(texto)
+    tg.avisar_al_admin = _avisar_real   # aqui si se quiere el aviso de verdad
+    try:
+        tg._ULTIMOS_AVISOS.clear()
+        revisar(cliente.get("/tasks/respaldo").status_code == 403,
+                "la ruta de respaldo rechaza una llamada sin token")
+        revisar(cliente.get("/tasks/respaldo?token=malo").status_code == 403,
+                "rechaza un token incorrecto")
+
+        # Un cron con el token equivocado fallaba en silencio durante dias.
+        # Ahora cada rechazo avisa: es la unica forma de enterarse de que la
+        # tarea lleva tiempo sin ejecutarse.
+        tg._ULTIMOS_AVISOS.clear()
+        cliente.get("/tasks/revisar-vencimientos?token=equivocado")
+        revisar(any("token incorrecto" in a for a in avisos),
+                "un token incorrecto en los recordatorios avisa al administrador")
+        revisar(any("Render" in a for a in avisos),
+                "el aviso explica donde mirar para arreglarlo")
+
+        tg._ULTIMOS_AVISOS.clear()
+        avisos.clear()
+        cliente.get("/tasks/respaldo?token=equivocado")
+        revisar(any("respaldo" in a for a in avisos),
+                "y lo mismo en la tarea de respaldo")
+
+        avisos.clear()
+        cliente.get("/tasks/respaldo?token=equivocado")
+        revisar(not avisos, "no repite el aviso en cada intento fallido")
+    finally:
+        tg.enviar_mensaje = envio_real
+        tg.avisar_al_admin = lambda *a, **k: None
+        tg._ULTIMOS_AVISOS.clear()
 
     corridas = []
     main.tareas.ejecutar_respaldo = lambda: corridas.append(1)
@@ -694,10 +737,13 @@ def probar_respaldo() -> None:
             "el respaldo lleva fecha y un resumen por tabla")
     db.supabase = supabase_real
 
-    # Los avisos no deben repetirse en bucle ni propagar errores.
+    # Los avisos no deben repetirse en bucle ni propagar errores. Aqui se
+    # vuelve a usar la funcion real: en el resto de la bateria esta anulada
+    # para que ninguna prueba salga a Telegram sin querer.
     enviados = []
     envio_real = tg.enviar_mensaje
     tg.enviar_mensaje = lambda chat, texto, teclado=None: enviados.append(texto)
+    tg.avisar_al_admin = _avisar_real
     try:
         tg._ULTIMOS_AVISOS.clear()
         tg.avisar_al_admin("Prueba de aviso", "detalle")
@@ -710,6 +756,8 @@ def probar_respaldo() -> None:
         revisar(True, "si el aviso falla, no revienta encima del error original")
     finally:
         tg.enviar_mensaje = envio_real
+        tg.avisar_al_admin = lambda *a, **k: None
+        tg._ULTIMOS_AVISOS.clear()
 
 
 # =====================================================================
