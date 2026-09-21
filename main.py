@@ -19,8 +19,12 @@ Y tanto el webhook como la tarea contestan de inmediato y hacen el trabajo
 después, para que ni Telegram ni cron-job.org se queden esperando.
 """
 
+import mimetypes
+import os
+
 from fastapi import BackgroundTasks, FastAPI, Request, Header, HTTPException
 from fastapi.responses import PlainTextResponse
+from fastapi.staticfiles import StaticFiles
 
 from config import TASKS_TOKEN, TELEGRAM_WEBHOOK_SECRET
 import handlers, tareas
@@ -43,6 +47,14 @@ async def cabeceras_seguridad(request: Request, call_next):
     aparte hay que quitarlo, y solo entonces la CSP protegerá de verdad.
     """
     respuesta = await call_next(request)
+
+    # Las imágenes se sirven desde /estaticos y no cambian salvo que se
+    # reemplacen a mano: se cachean un año. Antes viajaban incrustadas en
+    # panel.html como base64, así que el navegador se las volvía a descargar
+    # en cada carga —350 KB de los 398 KB del archivo— sin poder guardarlas.
+    if request.url.path.startswith("/estaticos/"):
+        respuesta.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+
     respuesta.headers["X-Frame-Options"] = "DENY"
     respuesta.headers["X-Content-Type-Options"] = "nosniff"
     respuesta.headers["Referrer-Policy"] = "no-referrer"
@@ -63,6 +75,21 @@ async def cabeceras_seguridad(request: Request, call_next):
     )
     return respuesta
 
+
+# Windows no trae registrado el tipo de los .webp, y entonces se servirían como
+# texto plano. Con la cabecera X-Content-Type-Options: nosniff que declaramos
+# más abajo, el navegador NO adivina el tipo: se negaría a dibujar la imagen y
+# el panel saldría sin fondo ni logotipo. Se registra explícitamente.
+mimetypes.add_type("image/webp", ".webp")
+mimetypes.add_type("image/svg+xml", ".svg")
+
+# Imágenes del panel. Se monta solo si la carpeta existe, para que un clon
+# incompleto del repositorio no impida arrancar el servicio.
+_RUTA_ESTATICOS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "estaticos")
+if os.path.isdir(_RUTA_ESTATICOS):
+    app.mount("/estaticos", StaticFiles(directory=_RUTA_ESTATICOS), name="estaticos")
+else:
+    print("[main] AVISO: falta la carpeta estaticos/; el panel se verá sin imágenes.")
 
 # Rutas de la web (/panel, /api/login, /api/mis-datos, /api/usuarios, ...).
 app.include_router(web.router)
@@ -134,4 +161,26 @@ def revisar_vencimientos(
         return PlainTextResponse("token invalido", status_code=403)
 
     tareas_fondo.add_task(tareas.ejecutar_revision)
+    return PlainTextResponse("ok")
+
+
+@app.get("/tasks/respaldo", response_class=PlainTextResponse)
+@app.post("/tasks/respaldo", response_class=PlainTextResponse)
+def respaldo(
+    tareas_fondo: BackgroundTasks,
+    token: str = "",
+    x_tasks_token: str = Header(default=""),
+):
+    """
+    Exporta la base de datos y se la manda al administrador por Telegram.
+
+    Pensada para un disparo semanal desde cron-job.org. Protegida con el mismo
+    TASKS_TOKEN y, como la otra tarea, responde de inmediato y trabaja después:
+    el volcado puede tardar varios segundos y el cron corta a los 30.
+    """
+    entregado = x_tasks_token or token
+    if TASKS_TOKEN and entregado != TASKS_TOKEN:
+        return PlainTextResponse("token invalido", status_code=403)
+
+    tareas_fondo.add_task(tareas.ejecutar_respaldo)
     return PlainTextResponse("ok")

@@ -63,6 +63,61 @@ def enviar_mensaje(chat_id: int, texto: str, teclado: dict | None = None) -> dic
     return _llamar("sendMessage", datos)
 
 
+def enviar_documento(chat_id: int, nombre: str, contenido: bytes,
+                     descripcion: str = "") -> dict:
+    """
+    Envía un archivo a un chat. Se usa para dejar el respaldo de la base de
+    datos en la conversación del administrador: queda fuera del servidor, en
+    un sitio al que él siempre tiene acceso, sin montar nada más.
+    """
+    respuesta = _cliente.post(
+        f"{_API}/sendDocument",
+        data={"chat_id": chat_id, "caption": descripcion[:1000], "parse_mode": "HTML"},
+        files={"document": (nombre, contenido, "application/json")},
+    )
+    respuesta.raise_for_status()
+    return respuesta.json()
+
+
+# ---------- Avisos al administrador ----------
+
+# Sin esto, un error solo quedaba impreso en los registros de Render, que
+# rotan y nadie mira: el bot podía estar fallando durante días sin que nadie
+# lo supiera. Se avisa por Telegram, que es donde el administrador ya está.
+_ULTIMOS_AVISOS: dict[str, float] = {}
+MINUTOS_ENTRE_AVISOS_IGUALES = 30
+
+
+def avisar_al_admin(asunto: str, detalle: str = "") -> None:
+    """
+    Manda un aviso al administrador. Nunca lanza excepción: si el aviso falla,
+    el problema original ya es bastante y no conviene taparlo con otro.
+
+    Repite como mucho un aviso igual cada media hora, para que un error que se
+    dispara en bucle no convierta el chat en un cañón de mensajes.
+    """
+    import time
+    from config import ADMIN_TELEGRAM_ID
+
+    if not ADMIN_TELEGRAM_ID:
+        return
+    ahora = time.time()
+    anterior = _ULTIMOS_AVISOS.get(asunto, 0)
+    if ahora - anterior < MINUTOS_ENTRE_AVISOS_IGUALES * 60:
+        return
+    _ULTIMOS_AVISOS[asunto] = ahora
+
+    texto = f"⚠️ <b>{asunto}</b>"
+    if detalle:
+        # Telegram corta a los 4096 caracteres; se deja margen.
+        recorte = detalle[-1200:]
+        texto += f"\n\n<pre>{recorte}</pre>"
+    try:
+        enviar_mensaje(ADMIN_TELEGRAM_ID, texto)
+    except Exception as e:
+        print(f"[telegram] no se pudo avisar al administrador: {e}")
+
+
 def responder_callback(callback_id: str, texto: str = "") -> dict:
     """
     Cuando el usuario toca un botón "inline", Telegram espera una confirmación.

@@ -165,16 +165,45 @@ def buscar_usuario_por_telefono_normalizado(telefono_digitos: str) -> dict | Non
 
     if _soporta_telefono_normalizado():
         resp = (supabase.table("usuarios").select("*")
-                .eq("telefono_normalizado", obj9).limit(1).execute())
-        return resp.data[0] if resp.data else None
+                .eq("telefono_normalizado", obj9).execute())
+        candidatos = resp.data or []
+    else:
+        # Camino antiguo, solo mientras la migración 002 no se haya ejecutado.
+        candidatos = []
+        for u in supabase.table("usuarios").select("*").execute().data or []:
+            guardado = "".join(c for c in str(u.get("telefono") or "") if c.isdigit())
+            if guardado and len(guardado) >= 9 and guardado[-9:] == obj9:
+                candidatos.append(u)
 
-    # Camino antiguo, solo mientras la migración 002 no se haya ejecutado.
-    for u in supabase.table("usuarios").select("*").execute().data or []:
+    return _desempatar_por_telefono(candidatos, telefono_digitos)
+
+
+def _desempatar_por_telefono(candidatos: list[dict], digitos: str) -> dict | None:
+    """
+    Elige a qué usuario corresponde el número entre varios con los mismos
+    nueve dígitos finales.
+
+    La comparación por los últimos nueve dígitos es tolerante a propósito:
+    permite entrar escribiendo '0990287112' aunque en la base esté guardado
+    como '593990287112'. Pero desde que el panel ofrece varios países, dos
+    personas de países distintos pueden compartir esos nueve dígitos —un
+    número ecuatoriano y uno peruano, por ejemplo— y entonces la tolerancia
+    se vuelve ambigüedad. Ante varios candidatos manda la coincidencia
+    exacta del número completo.
+    """
+    if not candidatos:
+        return None
+    if len(candidatos) == 1:
+        return candidatos[0]
+
+    for u in candidatos:
         guardado = "".join(c for c in str(u.get("telefono") or "") if c.isdigit())
-        if not guardado:
-            continue
-        if guardado == telefono_digitos or (len(guardado) >= 9 and guardado[-9:] == obj9):
+        if guardado == digitos:
             return u
+
+    print(f"[db] AVISO: {len(candidatos)} usuarios comparten los últimos 9 dígitos "
+          f"y ninguno coincide exactamente con el número recibido. No se "
+          f"autentica a ninguno para no entregar la cuenta equivocada.")
     return None
 
 
@@ -502,6 +531,37 @@ def guardar_estado(telegram_id: int, paso: str, datos: dict) -> None:
 def limpiar_estado(telegram_id: int) -> None:
     """Borra la conversación en curso (cuando termina o se cancela)."""
     supabase.table("estado_conversacion").delete().eq("telegram_id", telegram_id).execute()
+
+
+# ==================== RESPALDO ====================
+
+# Tablas que se incluyen en el respaldo. Están todas: los catálogos ocupan
+# poco y tenerlos permite reconstruir la base entera desde el archivo.
+TABLAS_RESPALDO = ["usuarios", "vehiculos", "variantes", "tipos_mantenimiento",
+                   "intervalos", "mantenimientos", "lecturas_km", "alertas"]
+
+
+def exportar_todo() -> dict:
+    """
+    Devuelve el contenido de todas las tablas, listo para serializar a JSON.
+
+    La columna con la contraseña heredada en claro se omite a propósito: un
+    respaldo que la incluyera esparciría esas credenciales a cada copia.
+    """
+    volcado: dict = {"generado_en": _ahora_iso(), "tablas": {}}
+    for tabla in TABLAS_RESPALDO:
+        try:
+            filas = supabase.table(tabla).select("*").execute().data or []
+        except Exception as e:
+            volcado["tablas"][tabla] = {"error": str(e)[:200]}
+            continue
+        if tabla == "usuarios":
+            filas = [{k: v for k, v in f.items()
+                      if k not in ("clave", "reset_codigo")} for f in filas]
+        volcado["tablas"][tabla] = filas
+    volcado["resumen"] = {t: (len(f) if isinstance(f, list) else "error")
+                          for t, f in volcado["tablas"].items()}
+    return volcado
 
 
 # ==================== Ayudas de fecha ====================

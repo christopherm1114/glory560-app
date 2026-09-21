@@ -45,6 +45,8 @@ def procesar_update(update: dict) -> None:
         # log solo aparecía el mensaje del error, sin la línea que lo provocó.
         print(f"[ERROR] procesando update: {e}")
         traceback.print_exc()
+        tg.avisar_al_admin(f"Error en el bot: {type(e).__name__}",
+                           traceback.format_exc())
         chat_id = _chat_del_update(update)
         if chat_id:
             try:
